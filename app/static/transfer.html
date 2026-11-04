@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Import / Export · Radio Poller</title>
+  <link href="/vendor/daisyui-5.7.50.css" rel="stylesheet" type="text/css" />
+  <script src="/vendor/tailwindcss-browser-4.3.4.js"></script>
+  <script>
+    // Follow the OS light/dark setting explicitly so the daisyUI theme always matches it.
+    (() => {
+      const mq = matchMedia('(prefers-color-scheme: dark)');
+      const apply = () => { document.documentElement.dataset.theme = mq.matches ? 'dark' : 'light'; };
+      apply();
+      mq.addEventListener('change', apply);
+    })();
+  </script>
+</head>
+<body>
+<div class="min-h-screen bg-base-200">
+  <div class="navbar bg-base-100 border-b border-base-300">
+    <div class="navbar-start">
+      <span class="text-lg font-semibold px-2">Radio Poller</span>
+    </div>
+    <div class="navbar-end pr-2">
+      <a class="btn btn-sm" href="/">Back to dashboard</a>
+    </div>
+  </div>
+
+  <main class="max-w-2xl mx-auto p-4 flex flex-col gap-4">
+    <h1 class="text-xl font-semibold">Import / Export</h1>
+    <p class="text-sm opacity-70">
+      Move your play history to another server: export here, then import on the new server's copy of this page.
+    </p>
+
+    <div id="notice" role="status"></div>
+
+    <section id="token-card" class="card bg-base-100 border border-base-300 hidden">
+      <div class="card-body gap-2">
+        <h2 class="card-title text-base">Admin token</h2>
+        <p class="text-sm opacity-70">This server requires a token to export or import data.</p>
+        <input id="token" type="password" class="input w-full sm:w-80" placeholder="Admin token" autocomplete="off" aria-label="Admin token">
+      </div>
+    </section>
+
+    <section class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-3">
+        <h2 class="card-title text-base">Export</h2>
+        <select id="export-station" class="select w-full sm:w-auto" aria-label="Station to export">
+          <option value="">All stations</option>
+        </select>
+        <label class="flex items-center gap-3 w-fit cursor-pointer">
+          <input id="export-plays" type="checkbox" class="checkbox" checked>
+          <span>Include play history</span>
+        </label>
+        <p id="export-summary" class="text-sm opacity-70">Loading…</p>
+        <p id="export-note" class="text-sm opacity-70"></p>
+        <div><a id="export-link" class="btn" href="/api/export" download>Download export</a></div>
+        <div id="export-result" role="status"></div>
+      </div>
+    </section>
+
+    <section id="import-card" class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-3">
+        <h2 class="card-title text-base">Import</h2>
+        <p class="text-sm opacity-70">
+          Adds the plays from an export file to this server's history. Plays that are already here are skipped,
+          so it's safe to import the same file twice. Stations this server doesn't have yet are added with their
+          feed settings and start polling if they were switched on. Stations it already has keep their own settings.
+        </p>
+        <form id="import-form" class="flex flex-col gap-3">
+          <input id="file" type="file" class="file-input w-full" accept=".jsonl,.ndjson,.json,application/x-ndjson" aria-label="Export file" required>
+          <div class="flex items-center gap-3">
+            <button id="go" type="submit" class="btn">Import</button>
+            <progress id="progress" class="progress w-full hidden" value="0" max="100"></progress>
+          </div>
+        </form>
+        <div id="result" role="status"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const nf = new Intl.NumberFormat();
+  const fmtDate = (t) => new Date(t * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  let info = { max_bytes: Infinity };
+
+  function updateExport() {
+    const id = $('export-station').value;
+    const st = (info.station_list || []).find((x) => x.id === id);
+    const range = (a, b) => `${fmtDate(a)} to ${fmtDate(b)}`;
+    const withPlays = $('export-plays').checked;
+    $('export-note').textContent = withPlays
+      ? 'Downloads the plays as one plain-text file, about 250 bytes per play.'
+      : 'Downloads only the station list: each station\'s name, feed, order and on/off setting. Import it on another server to set up the same stations there, without any history.';
+    const q = new URLSearchParams();
+    if (id) q.set('station', id);
+    if (!withPlays) q.set('plays', '0');
+    $('export-link').href = '/api/export' + (q.toString() ? '?' + q : '');
+    if (!withPlays) {
+      $('export-summary').textContent = id && st ? `${st.name}: its feed settings only, no plays.`
+        : `${nf.format(info.stations)} station${info.stations === 1 ? '' : 's'}: feed settings only, no plays.`;
+      return;
+    }
+    if (id && st) {
+      $('export-summary').textContent = st.plays
+        ? `${nf.format(st.plays)} plays from ${st.name}, ${range(st.first_play, st.last_play)}.`
+        : `${st.name} has no plays yet.`;
+    } else {
+      $('export-summary').textContent = info.plays
+        ? `${nf.format(info.plays)} plays from ${nf.format(info.stations)} stations, ${range(info.first_play, info.last_play)}.`
+        : 'Nothing to export yet.';
+    }
+  }
+
+  async function loadInfo() {
+    try {
+      info = await (await fetch('/api/transfer-info')).json();
+      const sel = $('export-station');
+      const chosen = sel.value;
+      sel.innerHTML = '<option value="">All stations</option>' + info.station_list.map((s) =>
+        `<option value="${esc(s.id)}">${esc(s.name)}${s.active ? '' : ' (paused)'}</option>`).join('');
+      sel.value = chosen;  // keep the choice across refreshes; falls back to "All" if it vanished
+      updateExport();
+      $('token-card').classList.toggle('hidden', !info.token_required);
+      if (info.token_required && !$('token').value) $('token').value = saved.get();
+      $('import-card').classList.toggle('hidden', Boolean(info.read_only));
+      $('notice').innerHTML = info.read_only ? '<div class="alert alert-info"><div>This server is read-only, so data can be exported here but not imported.</div></div>' : '';
+    } catch (err) {
+      $('export-summary').textContent = 'Could not load a summary of this server\'s data.';
+    }
+  }
+
+  $('export-station').addEventListener('change', updateExport);
+  $('export-plays').addEventListener('change', updateExport);
+
+  function show(kind, html, target = 'result') {
+    $(target).innerHTML = html ? `<div class="alert alert-${kind}"><div>${html}</div></div>` : '';
+  }
+
+  const saved = { get() { try { return sessionStorage.getItem('adminToken') || ''; } catch (_) { return ''; } },
+                  set(v) { try { sessionStorage.setItem('adminToken', v); } catch (_) { /* private mode */ } } };
+  $('token').addEventListener('input', () => saved.set($('token').value));
+
+  // With a token set, the download link can't carry it, so fetch the file and save it from here.
+  $('export-link').addEventListener('click', async (e) => {
+    if (!info.token_required) return;  // otherwise it's a plain download link
+    e.preventDefault();
+    show('', '', 'export-result');
+    try {
+      const res = await fetch($('export-link').getAttribute('href'), { headers: { 'X-Admin-Token': $('token').value } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Server returned HTTP ${res.status}`);
+      const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'radio-poller.jsonl';
+      const url = URL.createObjectURL(await res.blob());
+      const a = Object.assign(document.createElement('a'), { href: url, download: name });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      show('error', esc(err.message), 'export-result');
+    }
+  });
+
+  function upload(file) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/import');
+      xhr.setRequestHeader('Content-Type', 'application/x-ndjson');
+      if (info.token_required) xhr.setRequestHeader('X-Admin-Token', $('token').value);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) $('progress').value = Math.round((e.loaded / e.total) * 100);
+      };
+      xhr.upload.onload = () => { $('progress').removeAttribute('value'); };  // uploaded; server is still merging
+      xhr.onload = () => {
+        let body = {};
+        try { body = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
+        if (xhr.status === 200) resolve(body); else reject(new Error(body.error || `Server returned HTTP ${xhr.status}`));
+      };
+      xhr.onerror = () => reject(new Error('The upload failed before the server answered. Check that the server is still running.'));
+      xhr.send(file);
+    });
+  }
+
+  $('import-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = $('file').files[0];
+    if (!file) return;
+    if (file.size > info.max_bytes) {
+      return show('error', `That file is ${nf.format(Math.round(file.size / 2 ** 20))} MB; this server accepts up to ${nf.format(Math.round(info.max_bytes / 2 ** 20))} MB (set <code>MAX_IMPORT_MB</code> to raise it).`);
+    }
+    $('go').disabled = true;
+    $('progress').value = 0;
+    $('progress').classList.remove('hidden');
+    $('result').innerHTML = '';
+    try {
+      if (info.token_required) {  // a wrong token is caught here, not after a long upload
+        const check = await fetch('/api/check-token', { method: 'POST', body: '{}',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': $('token').value } });
+        if (!check.ok) throw new Error((await check.json().catch(() => ({}))).error || `Server returned HTTP ${check.status}`);
+      }
+      const r = await upload(file);
+      const lines = [];
+      if (r.stations_added) lines.push(`Added <b>${nf.format(r.stations_added)}</b> station${r.stations_added === 1 ? '' : 's'}: review them on the <a class="link" href="/stations">Stations page</a>.`);
+      if (r.plays_added || r.plays_skipped) lines.push(`Added <b>${nf.format(r.plays_added)}</b> plays; <b>${nf.format(r.plays_skipped)}</b> were already here.`);
+      if (!lines.length) lines.push('Nothing new: everything in that file was already here.');
+      if (r.invalid_lines) {
+        const n = r.invalid_lines;
+        lines.push(`${nf.format(n)} line${n === 1 ? '' : 's'} couldn't be read and ${n === 1 ? 'was' : 'were'} skipped (${[...new Set(r.errors)].map(esc).join('; ')}).`);
+      }
+      if (!r.complete) lines.push('The file has no end marker, so it may have been cut short. Re-download it and import again to be sure; duplicates are skipped.');
+      show(r.complete && !r.invalid_lines ? 'success' : 'warning', lines.join('<br>') + '<br><a class="link" href="/">Open the dashboard</a>');
+      loadInfo();
+    } catch (err) {
+      show('error', esc(err.message));
+    } finally {
+      $('go').disabled = false;
+      $('progress').classList.add('hidden');
+    }
+  });
+
+  loadInfo();
+})();
+</script>
+</body>
+</html>

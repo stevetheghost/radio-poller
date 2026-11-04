@@ -1,0 +1,2 @@
+# Timezone database for zoneinfo (Alpine has none). Everything else is the standard library.
+tzdata

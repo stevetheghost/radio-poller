@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stations · Radio Poller</title>
+  <link href="/vendor/daisyui-5.7.50.css" rel="stylesheet" type="text/css" />
+  <script src="/vendor/tailwindcss-browser-4.3.4.js"></script>
+  <script>
+    // Follow the OS light/dark setting explicitly so the daisyUI theme always matches it.
+    (() => {
+      const mq = matchMedia('(prefers-color-scheme: dark)');
+      const apply = () => { document.documentElement.dataset.theme = mq.matches ? 'dark' : 'light'; };
+      apply();
+      mq.addEventListener('change', apply);
+    })();
+  </script>
+  <style>
+    :root {
+      --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+      --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+        --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+      }
+    }
+    .swatch { display: inline-block; width: .625rem; height: .625rem; border-radius: 2px; flex: none; }
+  </style>
+</head>
+<body>
+<div class="min-h-screen bg-base-200">
+  <div class="navbar bg-base-100 border-b border-base-300">
+    <div class="navbar-start">
+      <span class="text-lg font-semibold px-2">Radio Poller</span>
+    </div>
+    <div class="navbar-end pr-2">
+      <a class="btn btn-sm" href="/">Back to dashboard</a>
+    </div>
+  </div>
+
+  <main class="max-w-3xl mx-auto p-4 flex flex-col gap-4">
+    <h1 class="text-xl font-semibold">Stations</h1>
+    <p class="text-sm opacity-70">
+      Switch stations on or off, rename and reorder them, and add new ones. Changes take effect within a few seconds.
+      Switching a station off pauses polling but keeps its history.
+      You can also add the same station twice under different names (for a Christmas-music version, say) and switch between them.
+    </p>
+
+    <div id="message" role="status"></div>
+    <div id="readonly" class="alert alert-info hidden"><div>This server is read-only, so stations can be looked at here but not changed.</div></div>
+
+    <section id="token-card" class="card bg-base-100 border border-base-300 hidden">
+      <div class="card-body gap-2">
+        <h2 class="card-title text-base">Admin token</h2>
+        <p class="text-sm opacity-70">This server requires a token to change stations.</p>
+        <input id="token" type="password" class="input w-full sm:w-80" placeholder="Admin token" autocomplete="off" aria-label="Admin token">
+      </div>
+    </section>
+
+    <section class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-2">
+        <h2 class="card-title text-base">Your stations</h2>
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead><tr><th>Order</th><th>Station</th><th>Status</th><th class="text-right">Plays</th><th>On</th><th><span class="sr-only">Delete</span></th></tr></thead>
+            <tbody id="rows"><tr><td colspan="6" class="text-center opacity-60 py-6">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="add-card" class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-3">
+        <h2 class="card-title text-base">Add a station</h2>
+        <p class="text-sm opacity-70">
+          Paste the station's web page and I'll find its feed: an iHeart page like <code>washfm.iheart.com</code>
+          or <code>iheart.com/live/…</code>, or an Audacy page like <code>audacy.com/kroq</code>.
+        </p>
+        <form id="find-form" class="flex gap-2">
+          <input id="url" type="text" class="input w-full" placeholder="https://www.audacy.com/kroq" aria-label="Station page address" autocomplete="off">
+          <button id="find" type="submit" class="btn">Find</button>
+        </form>
+
+        <form id="add-form" class="flex flex-col gap-3">
+          <div class="grid sm:grid-cols-3 gap-3">
+            <label class="flex flex-col gap-1 text-sm sm:col-span-3">Name
+              <input id="new-name" class="input w-full" maxlength="60" placeholder="106.7 KROQ" required>
+            </label>
+            <label class="flex flex-col gap-1 text-sm">Provider
+              <select id="new-provider" class="select w-full">
+                <option value="iheart">iHeart</option>
+                <option value="audacy">Audacy</option>
+              </select>
+            </label>
+            <label class="flex flex-col gap-1 text-sm sm:col-span-2">Station ID
+              <input id="new-id" class="input w-full" placeholder="101-299" required autocomplete="off">
+            </label>
+            <label class="flex flex-col gap-1 text-sm sm:col-span-3">Timezone (the station's local time)
+              <select id="new-tz" class="select w-full sm:w-72"></select>
+            </label>
+          </div>
+          <div class="flex items-center gap-3">
+            <button id="add" type="submit" class="btn">Add station</button>
+            <span class="text-xs opacity-60">The feed is tested first, so adding takes a few seconds.</span>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="delete-modal" class="modal">
+  <div class="modal-box">
+    <h3 class="text-lg font-semibold">Delete this station?</h3>
+    <p id="delete-text" class="py-3"></p>
+    <p class="text-sm opacity-70">This can't be undone. To keep a copy first, export it from <a class="link" href="/transfer">Import / Export</a>.
+      If you only want it to stop polling, switch it off instead.</p>
+    <div class="modal-action">
+      <form method="dialog" class="flex gap-2">
+        <button class="btn">Cancel</button>
+        <button id="delete-confirm" type="button" class="btn btn-error">Delete</button>
+      </form>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const nf = new Intl.NumberFormat();
+  const PROVIDERS = { iheart: 'iHeart', audacy: 'Audacy' };
+  const ZONES = [['America/New_York', 'Eastern'], ['America/Chicago', 'Central'], ['America/Denver', 'Mountain'],
+                 ['America/Phoenix', 'Arizona (no daylight time)'], ['America/Los_Angeles', 'Pacific'],
+                 ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii']];
+  const zoneLabel = (z) => (ZONES.find(([id]) => id === z) || [z, z])[1];
+  // "" means: use the server's timezone
+  function zoneOptions(selected) {
+    const list = ZONES.slice();
+    if (selected && !list.some(([id]) => id === selected)) list.push([selected, selected]);
+    return `<option value="">Server default${state.tz ? ` (${esc(state.tz)})` : ''}</option>` +
+      list.map(([id, label]) => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(label)}</option>`).join('');
+  }
+  const seriesColor = (slot) => `var(--series-${((slot ?? 0) % 8) + 1})`;
+
+  let state = { stations: [], now: 0 };
+  let tokenRequired = false;
+  let readOnly = false;
+  let pendingDelete = null;
+
+  const saved = { get() { try { return sessionStorage.getItem('adminToken') || ''; } catch (_) { return ''; } },
+                  set(v) { try { sessionStorage.setItem('adminToken', v); } catch (_) { /* private mode */ } } };
+
+  function ago(t, now) {
+    if (!t) return 'never';
+    const s = Math.max(0, now - t);
+    if (s < 90) return 'just now';
+    if (s < 5400) return `${Math.round(s / 60)} min ago`;
+    if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+    return `${Math.round(s / 86400)} d ago`;
+  }
+
+  function say(kind, html) {
+    $('message').innerHTML = html ? `<div class="alert alert-${kind}"><div>${html}</div></div>` : '';
+  }
+
+  async function send(method, path, body) {
+    const headers = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (tokenRequired) headers['X-Admin-Token'] = $('token').value;
+    let res;
+    try {
+      res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch (_) {
+      throw new Error('Could not reach the server.');
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) $('token').focus();
+      throw new Error(data.error || `The server answered HTTP ${res.status}.`);
+    }
+    return data;
+  }
+
+  // ---- the stations table ---------------------------------------------------
+
+  function status(s) {
+    if (!s.provider) return ['ghost', 'No feed', 'This station has no feed set up. Add it again by URL to reconnect it.'];
+    if (!s.active) return ['ghost', 'Paused', ''];
+    if (s.last_error) return ['error', 'Failing', s.last_error];
+    if (s.last_ok_at && state.now - s.last_ok_at > 600) return ['warning', 'Stale', 'No successful poll for over 10 minutes'];
+    return s.last_ok_at ? ['success', 'Polling', ''] : ['ghost', 'Waiting', ''];
+  }
+
+  function render() {
+    const list = state.stations;
+    if (!list.length) {
+      $('rows').innerHTML = '<tr><td colspan="6" class="text-center opacity-60 py-6">No stations yet. Add one below.</td></tr>';
+      return;
+    }
+    $('rows').innerHTML = list.map((s, i) => {
+      const [kind, label, tip] = status(s);
+      let feed = s.provider ? `${PROVIDERS[s.provider] || esc(s.provider)} · ${esc(s.provider_id)}` : 'No feed';
+      const twins = list.filter((o) => o.id !== s.id && s.provider && o.provider === s.provider && o.provider_id === s.provider_id);
+      if (twins.length) feed += ` · same feed as ${twins.map((o) => esc(o.name)).join(', ')}`;
+      const doubled = s.active && twins.some((o) => o.active);
+      return `<tr data-id="${esc(s.id)}">
+        <td><div class="join">
+          <button class="btn btn-xs join-item" data-move="-1" aria-label="Move ${esc(s.name)} up" ${i === 0 || readOnly ? 'disabled' : ''}>▲</button>
+          <button class="btn btn-xs join-item" data-move="1" aria-label="Move ${esc(s.name)} down" ${i === list.length - 1 || readOnly ? 'disabled' : ''}>▼</button>
+        </div></td>
+        <td><div class="flex items-center gap-2"><span class="swatch" style="background:${seriesColor(s.color)}"></span>
+          <input class="input input-sm w-36 sm:w-48" data-name value="${esc(s.name)}" maxlength="60" aria-label="Name of ${esc(s.name)}" ${readOnly ? 'disabled' : ''}></div>
+          <div class="text-xs opacity-60 mt-1">${feed}</div>
+          <select class="select select-xs mt-1 w-52" data-tz aria-label="Timezone of ${esc(s.name)}" ${readOnly ? 'disabled' : ''}>${zoneOptions(s.timezone)}</select></td>
+        <td><span class="badge badge-sm badge-${kind} ${kind === 'ghost' ? '' : 'badge-soft'}" title="${esc(tip)}">${label}</span>
+          <div class="text-xs opacity-60 mt-1 whitespace-nowrap">last play ${ago(s.last_play, state.now)}</div>
+          ${doubled ? '<div class="mt-1"><span class="badge badge-sm badge-warning badge-soft" title="Both copies of this feed are on, so each song is logged twice. Switch one off.">Both on</span></div>' : ''}</td>
+        <td class="text-right tabular-nums">${nf.format(s.plays)}</td>
+        <td><input type="checkbox" class="toggle" data-toggle aria-label="Poll ${esc(s.name)}" ${s.active ? 'checked' : ''} ${s.provider && !readOnly ? '' : 'disabled'}></td>
+        <td><button class="btn btn-sm btn-ghost" data-delete ${readOnly ? 'disabled' : ''}>Delete</button></td>
+      </tr>`;
+    }).join('');
+  }
+
+  const apply = (data) => {
+    state = data;
+    render();
+    const keep = $('new-tz').value;  // the add form's options carry the server's default label
+    $('new-tz').innerHTML = zoneOptions(keep);
+    $('new-tz').value = keep;
+  };
+
+  async function load() {
+    try { apply(await (await fetch('/api/stations')).json()); }
+    catch (_) { say('error', 'Could not load the stations.'); }
+  }
+
+  async function act(fn, success) {
+    say('', '');
+    try {
+      const data = await fn();
+      apply(data);
+      if (success) say('success', success(data));
+      return data;
+    } catch (err) {
+      say('error', esc(err.message));
+      load();  // put the table back to what the server really has
+      return null;
+    }
+  }
+
+  $('rows').addEventListener('change', (e) => {
+    const id = e.target.closest('tr')?.dataset.id;
+    if (!id) return;
+    if (e.target.matches('[data-toggle]')) {
+      act(() => send('PATCH', `/api/stations/${encodeURIComponent(id)}`, { enabled: e.target.checked }));
+    } else if (e.target.matches('[data-tz]')) {
+      act(() => send('PATCH', `/api/stations/${encodeURIComponent(id)}`, { timezone: e.target.value || null }));
+    } else if (e.target.matches('[data-name]')) {
+      const name = e.target.value.trim();
+      if (!name) { say('error', 'A station needs a name.'); return load(); }
+      act(() => send('PATCH', `/api/stations/${encodeURIComponent(id)}`, { name }));
+    }
+  });
+
+  $('rows').addEventListener('click', (e) => {
+    const row = e.target.closest('tr');
+    const id = row?.dataset.id;
+    if (!id) return;
+    const move = e.target.closest('[data-move]');
+    if (move) {
+      const ids = state.stations.map((s) => s.id);
+      const from = ids.indexOf(id), to = from + Number(move.dataset.move);
+      if (to < 0 || to >= ids.length) return;
+      [ids[from], ids[to]] = [ids[to], ids[from]];
+      act(() => send('POST', '/api/stations/order', { order: ids }));
+    } else if (e.target.closest('[data-delete]')) {
+      const s = state.stations.find((x) => x.id === id);
+      pendingDelete = s;
+      $('delete-text').innerHTML = `Delete <b>${esc(s.name)}</b> and its <b>${nf.format(s.plays)}</b> logged plays?`;
+      $('delete-modal').showModal();
+    }
+  });
+
+  $('delete-confirm').addEventListener('click', async () => {
+    const s = pendingDelete;
+    $('delete-modal').close();
+    if (!s) return;
+    pendingDelete = null;
+    await act(() => send('DELETE', `/api/stations/${encodeURIComponent(s.id)}?confirm=${encodeURIComponent(s.id)}`),
+      (d) => `Deleted ${esc(s.name)} and ${nf.format(d.deleted_plays)} plays.`);
+  });
+
+  // ---- adding a station -----------------------------------------------------
+
+  const busy = (btn, on) => {
+    btn.disabled = on;
+    btn.dataset.label = btn.dataset.label || btn.textContent;
+    btn.innerHTML = on ? '<span class="loading loading-spinner loading-xs"></span>' : btn.dataset.label;
+  };
+
+  $('find-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = $('url').value.trim();
+    if (!url) return;
+    say('', '');
+    busy($('find'), true);
+    try {
+      const r = await send('POST', '/api/stations/detect', { url });
+      $('new-provider').value = r.provider;
+      $('new-id').value = r.provider_id;
+      if (r.name) $('new-name').value = r.name;
+      $('new-tz').innerHTML = zoneOptions(r.timezone || '');
+      $('new-tz').value = r.timezone || '';
+      const what = `<b>${esc(r.name || 'A station')}</b> (${PROVIDERS[r.provider]} ${esc(r.provider_id)})`;
+      if (r.existing) say('warning', `${what} is already in your list as <b>${esc(r.existing)}</b>. You can add it again under a different name; the new copy starts switched off so songs aren't logged twice.`);
+      else if (!r.feed_ok) say('warning', `Found ${what}, but its feed didn't answer: ${esc(r.feed_error)}`);
+      else say('success', `Found ${what}.` + (r.sample ? ` Now playing there: ${esc(r.sample.title)} by ${esc(r.sample.artist)}.` : ' Its feed works but has no songs yet.') + (r.timezone ? ` It's on ${esc(zoneLabel(r.timezone))} time.` : ' Its timezone isn\'t clear from the page, so choose one below (or the server\'s is used).') + ' Check the details below, then add it.');
+    } catch (err) {
+      say('error', esc(err.message));
+    } finally {
+      busy($('find'), false);
+    }
+  });
+
+  $('add-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    busy($('add'), true);
+    const name = $('new-name').value.trim();
+    const provider = $('new-provider').value, providerId = $('new-id').value.trim();
+    const data = await act(() => send('POST', '/api/stations', { name, provider, provider_id: providerId, timezone: $('new-tz').value || null }),
+      (d) => {
+        const added = d.stations.find((s) => s.id === d.created);
+        const twin = d.stations.find((s) => s.id !== d.created && s.provider === provider && s.provider_id === providerId);
+        return twin && added && !added.active
+          ? `Added <b>${esc(name)}</b> as a copy of <b>${esc(twin.name)}</b>, switched off. Switch one off and the other on when you want to change over; the one you switch on only records songs from that moment.`
+          : `Added <b>${esc(name)}</b>. It will be polled within a few seconds.`;
+      });
+    busy($('add'), false);
+    if (data) { $('add-form').reset(); $('url').value = ''; }
+  });
+
+  $('token').addEventListener('input', () => saved.set($('token').value));
+
+  // ---- start ----------------------------------------------------------------
+
+  (async () => {
+    try {
+      const info = await (await fetch('/api/transfer-info')).json();
+      tokenRequired = info.token_required;
+      readOnly = Boolean(info.read_only);
+      $('readonly').classList.toggle('hidden', !readOnly);
+      $('add-card').classList.toggle('hidden', readOnly);
+      $('token-card').classList.toggle('hidden', !tokenRequired || readOnly);
+      if (tokenRequired) $('token').value = saved.get();
+    } catch (_) { /* the stations call below reports a dead server */ }
+    load();
+    setInterval(() => {  // keep the status column fresh, unless you're in the middle of editing
+      if (!document.hidden && !$('rows').contains(document.activeElement)) load();
+    }, 30000);
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+[
+  {"id": "washfm", "name": "97.1 WASH-FM", "provider": "iheart", "station_id": 2501, "timezone": "America/New_York"},
+  {"id": "dc101", "name": "DC101", "provider": "iheart", "station_id": 2525, "timezone": "America/New_York"},
+  {"id": "2wd", "name": "101.3 2WD", "provider": "audacy", "station_id": "101-988", "timezone": "America/New_York"},
+  {"id": "kroq", "name": "106.7 KROQ", "provider": "audacy", "station_id": "101-299", "timezone": "America/Los_Angeles"}
+]

@@ -1,0 +1,37 @@
+services:
+  radio-poller:
+    build: .
+    container_name: radio-poller
+    restart: unless-stopped
+    ports:
+      # Set BIND_ADDRESS=127.0.0.1 (in a .env file) when a reverse proxy on this machine sits in front,
+      # so the app can only be reached through it.
+      - "${BIND_ADDRESS:-0.0.0.0}:${PORT:-5555}:${PORT:-5555}"   # set PORT in .env to use another port
+    environment:
+      PORT: "${PORT:-5555}"     # the port the app listens on (and is published on)
+      TZ: America/New_York      # timezone used to group plays into days
+      POLL_SECONDS: "60"        # how often each station is checked
+      # --- for a server that strangers can reach: see "Running on a public server" in the README ---
+      # ADMIN_TOKEN: ""         # if set, importing, exporting and changing stations require this token
+      # READ_ONLY: "1"          # the web interface can't change anything at all
+      # TRUST_FORWARDED_FOR: "1"  # behind ONE reverse proxy: tell clients apart by X-Forwarded-For
+      # MAX_CONNECTIONS: "64"   # simultaneous requests before new ones get a 503
+      # REQUEST_TIMEOUT: "30"   # seconds a silent client may hold a connection
+      # MAX_IMPORT_MB: "1024"   # largest import file accepted
+    volumes:
+      - radio-data:/data        # SQLite database
+      - ./config:/config:ro     # stations.json: the starting stations, read on the first run only
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 256
+    # The app only writes to /data, so the rest of the container can be locked down.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  radio-data:

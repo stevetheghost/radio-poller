@@ -1,0 +1,6 @@
+data/
+tests/
+.claude/
+.git/
+**/__pycache__/
+README.md
