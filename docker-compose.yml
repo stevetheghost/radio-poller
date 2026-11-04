@@ -3,6 +3,8 @@ services:
     build: .
     container_name: radio-poller
     restart: unless-stopped
+    # Run as the user that owns the data and backup folders (set APP_UID / APP_GID in .env), so no chown is needed.
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
     ports:
       # Set BIND_ADDRESS=127.0.0.1 (in a .env file) when a reverse proxy on this machine sits in front,
       # so the app can only be reached through it.
@@ -11,7 +13,8 @@ services:
       PORT: "${PORT:-5555}"     # the port the app listens on (and is published on)
       TZ: America/New_York      # timezone used to group plays into days
       POLL_SECONDS: "60"        # how often each station is checked
-      # BACKUP_EVERY_HOURS: "24"  # automatic database snapshots, saved in /data/backups (0 = off)
+      BACKUP_DIR: /backups      # where the automatic snapshots go inside the container (the folder below)
+      # BACKUP_EVERY_HOURS: "24"  # automatic database snapshots (0 = off)
       # BACKUP_KEEP: "7"          # how many of the newest snapshots to keep
       # --- for a server that strangers can reach: see "Running on a public server" in the README ---
       # ADMIN_TOKEN: ""         # if set, importing, exporting and changing stations require this token
@@ -21,12 +24,14 @@ services:
       # REQUEST_TIMEOUT: "30"   # seconds a silent client may hold a connection
       # MAX_IMPORT_MB: "1024"   # largest import file accepted
     volumes:
-      - radio-data:/data        # SQLite database
+      # Two folders on this machine, set in .env (see .env.example). Use absolute paths outside this project folder.
+      - "${DATA_PATH:?Set DATA_PATH in a .env file (see .env.example)}:/data"             # the SQLite database
+      - "${BACKUP_PATH:?Set BACKUP_PATH in a .env file (see .env.example)}:/backups"      # automatic snapshots
       - ./config:/config:ro     # stations.json: the starting stations, read on the first run only
     mem_limit: 128m
     cpus: 0.25
     pids_limit: 256
-    # The app only writes to /data, so the rest of the container can be locked down.
+    # The app only writes to /data and /backups, so the rest of the container can be locked down.
     read_only: true
     tmpfs:
       - /tmp
@@ -34,6 +39,3 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-
-volumes:
-  radio-data:
