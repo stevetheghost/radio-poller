@@ -3,6 +3,7 @@ import signal
 import threading
 
 from . import config, db
+from .backup import BackupThread
 from .poller import Poller, seed_from_file
 from .server import make_server
 
@@ -26,7 +27,14 @@ def main():
     httpd = make_server(config.PORT, db_path, config.TZ_NAME, admin_token=config.ADMIN_TOKEN,
                         max_import_bytes=config.MAX_IMPORT_BYTES, read_only=config.READ_ONLY,
                         max_connections=config.MAX_CONNECTIONS, request_timeout=config.REQUEST_TIMEOUT,
-                        trust_forwarded=config.TRUST_FORWARDED_FOR)
+                        trust_forwarded=config.TRUST_FORWARDED_FOR, backup_dir=config.BACKUP_DIR,
+                        backup_every_hours=config.BACKUP_EVERY_HOURS, backup_keep=config.BACKUP_KEEP)
+    if config.BACKUP_EVERY_HOURS:
+        BackupThread(db_path, config.BACKUP_DIR, config.BACKUP_EVERY_HOURS * 3600, config.BACKUP_KEEP, stop).start()
+        log.info("automatic backups: every %d h, keeping the newest %d, in %s",
+                 config.BACKUP_EVERY_HOURS, config.BACKUP_KEEP, config.BACKUP_DIR)
+    else:
+        log.info("automatic backups are off (BACKUP_EVERY_HOURS=0)")
 
     if config.READ_ONLY:
         log.info("READ_ONLY is on: the web interface can't change stations or import data")

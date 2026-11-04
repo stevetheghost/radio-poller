@@ -30,6 +30,11 @@ HISTORY_COUNT = max(1, min(50, _env_int("HISTORY_COUNT", 10)))
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 MAX_IMPORT_BYTES = max(1, _env_int("MAX_IMPORT_MB", 1024)) * 1024 * 1024
 
+# Automatic snapshots of the database (see the README's Backups section).
+BACKUP_EVERY_HOURS = max(0, _env_int("BACKUP_EVERY_HOURS", 24))  # 0 turns them off
+BACKUP_KEEP = max(1, _env_int("BACKUP_KEEP", 7))                  # how many of the newest to keep
+BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", DATA_DIR / "backups"))
+
 # For a server that strangers can reach (see the README's section on public servers).
 READ_ONLY = _env_bool("READ_ONLY")                  # the web interface can't change anything
 MAX_CONNECTIONS = max(4, _env_int("MAX_CONNECTIONS", 64))  # simultaneous requests; more get a 503

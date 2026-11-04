@@ -11,6 +11,8 @@ services:
       PORT: "${PORT:-5555}"     # the port the app listens on (and is published on)
       TZ: America/New_York      # timezone used to group plays into days
       POLL_SECONDS: "60"        # how often each station is checked
+      # BACKUP_EVERY_HOURS: "24"  # automatic database snapshots, saved in /data/backups (0 = off)
+      # BACKUP_KEEP: "7"          # how many of the newest snapshots to keep
       # --- for a server that strangers can reach: see "Running on a public server" in the README ---
       # ADMIN_TOKEN: ""         # if set, importing, exporting and changing stations require this token
       # READ_ONLY: "1"          # the web interface can't change anything at all

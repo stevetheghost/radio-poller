@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import config, db, detect, queries, transfer
+from . import backup, config, db, detect, queries, transfer
 from .security import FailureLimiter
 from . import stations as station_admin
 
@@ -391,6 +391,7 @@ class Handler(BaseHTTPRequestHandler):
                 ]
                 info["token_required"] = bool(self.server.admin_token)
                 info["read_only"] = self.server.read_only
+                info["backup"] = backup.status(self.server.backup_dir, self.server.backup_every_hours, self.server.backup_keep)
                 info["max_bytes"] = self.server.max_import_bytes
                 return self._json(info)
             if path == "/api/now-playing":
@@ -415,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def make_server(port, db_path, tz_name, host="0.0.0.0", admin_token="", max_import_bytes=config.MAX_IMPORT_BYTES,
                 read_only=False, max_connections=config.MAX_CONNECTIONS, request_timeout=config.REQUEST_TIMEOUT,
-                trust_forwarded=config.TRUST_FORWARDED_FOR):
+                trust_forwarded=config.TRUST_FORWARDED_FOR, backup_dir=None, backup_every_hours=0, backup_keep=7):
     handler = type("TimedHandler", (Handler,), {"timeout": request_timeout})
     httpd = BoundedServer((host, port), handler, max_connections)
     httpd.db_path = db_path
@@ -426,4 +427,5 @@ def make_server(port, db_path, tz_name, host="0.0.0.0", admin_token="", max_impo
     httpd.read_only = read_only
     httpd.trust_forwarded = trust_forwarded
     httpd.limiter = FailureLimiter()
+    httpd.backup_dir, httpd.backup_every_hours, httpd.backup_keep = backup_dir, backup_every_hours, backup_keep
     return httpd

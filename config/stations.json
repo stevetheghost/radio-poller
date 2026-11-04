@@ -1,6 +1,9 @@
 [
-  {"id": "washfm", "name": "97.1 WASH-FM", "provider": "iheart", "station_id": 2501, "timezone": "America/New_York"},
+  {"id": "washfm", "name": "WASHFM", "provider": "iheart", "station_id": 2501, "timezone": "America/New_York"},
+  {"id": "washfmxmas", "name": "WASHFM X-Mas", "provider": "iheart", "station_id": 2501, "timezone": "America/New_York"},
   {"id": "dc101", "name": "DC101", "provider": "iheart", "station_id": 2525, "timezone": "America/New_York"},
-  {"id": "2wd", "name": "101.3 2WD", "provider": "audacy", "station_id": "101-988", "timezone": "America/New_York"},
-  {"id": "kroq", "name": "106.7 KROQ", "provider": "audacy", "station_id": "101-299", "timezone": "America/Los_Angeles"}
+  {"id": "2wd", "name": "101.3", "provider": "audacy", "station_id": "101-988", "timezone": "America/New_York"},
+  {"id": "2wdxmas", "name": "101.3 X-Mas", "provider": "audacy", "station_id": "101-988", "timezone": "America/New_York"},
+  {"id": "alt1021", "name": "Alt 102.1", "provider": "audacy", "station_id": "101-1041", "timezone": "America/New_York"},
+  {"id": "kroq", "name": "KROQ", "provider": "audacy", "station_id": "101-299", "timezone": "America/Los_Angeles"}
 ]

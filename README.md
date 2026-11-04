@@ -18,8 +18,7 @@ Open `http://<that-machine>:5555`. To use a different port, put `PORT=<number>` 
 `docker-compose.yml`. Logs: `docker compose logs -f`.
 
 - **Data** lives in the `radio-data` Docker volume (`/data/radio.db`), so it survives
-  rebuilds and restarts. Back it up with a copy of that file, e.g.
-  `docker compose cp radio-poller:/data/radio.db ./radio-backup.db`.
+  rebuilds and restarts. The app takes its own regular backups: see [Backups](#backups).
 - **Timezone** for grouping plays into days: `TZ` in `docker-compose.yml`.
 - **Poll rate**: `POLL_SECONDS` (default 60, minimum 15). Each poll also asks the provider
   for its last 10 plays, so a restart or short outage is backfilled and nothing is missed
@@ -151,6 +150,82 @@ nothing is loaded from a third party and the dashboard works without internet ac
 `/api/timeseries`, `/api/now-playing`, `/api/transfer-info`, `/api/song?key=`, `/api/export`,
 `POST /api/import`, `/health`. Most accept `station`,
 `range` (`24h`, `7d`, `30d`, `90d`, `365d`, `all`), `q`, and `limit`.
+
+## Backups
+
+**The app backs itself up.** By default it saves a snapshot of the database every 24 hours and keeps the
+newest 7, in a `backups/` folder beside the database (`/data/backups` in Docker). Each is a complete SQLite
+file made with SQLite's online backup, so it's consistent even while the poller is writing. (Don't copy
+`radio.db` by hand while the app is running: the copy can be corrupt.) The first one is made about 20 seconds
+after start, and the Import / Export page shows when the last one ran.
+
+| Setting | Default | |
+|---|---|---|
+| `BACKUP_EVERY_HOURS` | `24` | `0` turns automatic backups off |
+| `BACKUP_KEEP` | `7` | how many of the newest to keep |
+| `BACKUP_DIR` | `<data folder>/backups` | where they go |
+
+**Copy them off the machine.** Snapshots sit beside the database, so they protect against mistakes and
+corruption but not against losing the disk. Docker Compose has no scheduler of its own (there's no cron in a
+compose file), so pick one of these:
+
+- **A cron job on the host** (the simplest). `crontab -e`, then either of these (`%` must be written `\%` in a
+  crontab; add `-H "X-Admin-Token: ..."` to the curl if you set a token):
+
+  ```
+  # a full export (every play and station), restorable through the Import page
+  0 4 * * * curl -sf -o /backups/radio-$(date +\%F).jsonl http://localhost:5555/api/export
+
+  # or copy the app's own snapshots out of the container
+  0 4 * * * docker cp radio-poller:/data/backups/. /backups/
+  ```
+- **A small extra service in `docker-compose.yml`** that does the same on a timer (not tested here, since
+  Docker isn't installed on the machine this was built on). It saves a dated export into `./backups` on the host
+  once a day and deletes files older than 30 days:
+
+  ```yaml
+    backup-copy:
+      image: alpine:3.20
+      restart: unless-stopped
+      depends_on:
+        - radio-poller
+      environment:
+        ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
+      volumes:
+        - ./backups:/backups
+      command:
+        - sh
+        - -c
+        - |
+          while true; do
+            f=/backups/radio-$$(date +%F).jsonl
+            if wget -q -O "$$f.tmp" --header "X-Admin-Token: $$ADMIN_TOKEN" http://radio-poller:5555/api/export; then
+              mv "$$f.tmp" "$$f"
+            else
+              rm -f "$$f.tmp"
+            fi
+            find /backups -name 'radio-*.jsonl' -mtime +30 -delete
+            sleep 86400
+          done
+  ```
+
+  (If you changed `PORT`, change the 5555 here too. Then sync `./backups` somewhere off the machine.)
+- Any file-sync or backup tool pointed at the backups folder.
+
+**Restoring**
+- *From an export file* (`.jsonl`): start the app, open Import / Export and import it. It merges, so it works into
+  an empty server or one that has some data. This is the easiest way and works the same everywhere.
+- *From a snapshot (`radio-….db`), running without Docker:* stop the app, delete `radio.db-wal` and `radio.db-shm`
+  beside `radio.db`, copy the snapshot over `radio.db`, and start the app again.
+- *From a snapshot in Docker* (untested here): stop the app, copy the snapshot into the data volume, and start it
+  again. The volume is named `<folder>_radio-data` (check `docker volume ls`):
+
+  ```bash
+  docker compose stop
+  docker run --rm -v radio-poller_radio-data:/data -v "$PWD/backups":/b alpine sh -c \
+    'cp /b/radio-YYYYMMDD-HHMMSS.db /data/radio.db && rm -f /data/radio.db-wal /data/radio.db-shm && chown 10001 /data/radio.db'
+  docker compose start
+  ```
 
 ## Running on a public server
 

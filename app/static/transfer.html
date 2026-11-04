@@ -60,6 +60,17 @@
       </div>
     </section>
 
+    <section id="backup-card" class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-2">
+        <h2 class="card-title text-base">Automatic backups</h2>
+        <p id="backup-summary" class="text-sm">Loading…</p>
+        <p class="text-sm opacity-70">
+          Backups are saved next to the database, so they protect against mistakes and corruption but not against
+          losing the disk. Copy them somewhere else too: see Backups in the README.
+        </p>
+      </div>
+    </section>
+
     <section id="import-card" class="card bg-base-100 border border-base-300">
       <div class="card-body gap-3">
         <h2 class="card-title text-base">Import</h2>
@@ -87,6 +98,14 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nf = new Intl.NumberFormat();
+  function ago(t) {
+    const s = Math.max(0, Date.now() / 1000 - t);
+    if (s < 90) return 'just now';
+    if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
+    if (s < 129600) return `${Math.round(s / 3600)} hours ago`;
+    return `${Math.round(s / 86400)} days ago`;
+  }
+  const fmtBytes = (n) => (n >= 2 ** 20 ? `${(n / 2 ** 20).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
   const fmtDate = (t) => new Date(t * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   let info = { max_bytes: Infinity };
 
@@ -127,6 +146,11 @@
         `<option value="${esc(s.id)}">${esc(s.name)}${s.active ? '' : ' (paused)'}</option>`).join('');
       sel.value = chosen;  // keep the choice across refreshes; falls back to "All" if it vanished
       updateExport();
+      const b = info.backup || {};
+      $('backup-summary').innerHTML = !b.enabled
+        ? 'Automatic backups are <b>off</b> (<code>BACKUP_EVERY_HOURS=0</code>).'
+        : `A snapshot is saved every <b>${b.every_hours}</b> hour${b.every_hours === 1 ? '' : 's'}, keeping the newest <b>${b.keep}</b>. ` +
+          (b.count ? `Last one: <b>${ago(b.last)}</b> (${b.count} saved, ${fmtBytes(b.bytes)} in all).` : 'None yet; the first is made shortly after the server starts.');
       $('token-card').classList.toggle('hidden', !info.token_required);
       if (info.token_required && !$('token').value) $('token').value = saved.get();
       $('import-card').classList.toggle('hidden', Boolean(info.read_only));
