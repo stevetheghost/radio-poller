@@ -4,6 +4,7 @@ services:
     container_name: radio-poller
     restart: unless-stopped
     # Run as the user that owns the data and backup folders (set APP_UID / APP_GID in .env), so no chown is needed.
+    # Create the folders yourself first (mkdir -p data backups): if Docker creates them, root owns them.
     user: "${APP_UID:-10001}:${APP_GID:-10001}"
     ports:
       # Set BIND_ADDRESS=127.0.0.1 (in a .env file) when a reverse proxy on this machine sits in front,
@@ -24,9 +25,9 @@ services:
       # REQUEST_TIMEOUT: "30"   # seconds a silent client may hold a connection
       # MAX_IMPORT_MB: "1024"   # largest import file accepted
     volumes:
-      # Two folders on this machine, set in .env (see .env.example). Use absolute paths outside this project folder.
-      - "${DATA_PATH:?Set DATA_PATH in a .env file (see .env.example)}:/data"             # the SQLite database
-      - "${BACKUP_PATH:?Set BACKUP_PATH in a .env file (see .env.example)}:/backups"      # automatic snapshots
+      # Two folders next to this file. Set DATA_PATH / BACKUP_PATH in .env to put them somewhere else.
+      - "${DATA_PATH:-./data}:/data"             # the SQLite database
+      - "${BACKUP_PATH:-./backups}:/backups"     # automatic snapshots
       - ./config:/config:ro     # stations.json: the starting stations, read on the first run only
     mem_limit: 128m
     cpus: 0.25

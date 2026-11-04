@@ -10,16 +10,19 @@ and near-zero CPU; it makes one small request per station per minute.
 
 On the machine that will host it (needs Docker with the Compose plugin):
 
-1. **Make two folders** for the data and the backups. Use absolute paths outside this project folder, so
-   updating the project never touches your data. If you can, put the backups on a different disk.
+1. **Make the two folders** for the data and the backups, `./data` and `./backups` next to
+   `docker-compose.yml`, and tell compose which user should own what it writes there:
 
    ```bash
-   mkdir -p /srv/radio-poller/data /srv/radio-poller/backups
+   mkdir -p data backups
+   printf 'APP_UID=%s\nAPP_GID=%s\n' "$(id -u)" "$(id -g)" > .env
    ```
-2. **Tell compose about them.** Copy `.env.example` to `.env` and set `DATA_PATH` and `BACKUP_PATH` to those
-   folders, and `APP_UID` / `APP_GID` to the user that owns them (the output of `id -u` and `id -g`). Compose
-   refuses to start until the two paths are set. On Docker Desktop (Mac or Windows) the folders must be somewhere
-   Docker is allowed to share, which normally includes your home folder.
+
+   Create the folders yourself: if Docker has to create them, it makes them owned by root and the app can't
+   write to them. The `.env` file makes the app run as you, so it can.
+2. **Optional: put them elsewhere.** To use another location (say a second disk or a NAS mount for the backups),
+   set `DATA_PATH` and/or `BACKUP_PATH` in `.env` to absolute paths; see `.env.example`. On Docker Desktop (Mac
+   or Windows) the folders must be somewhere Docker is allowed to share, which normally includes your home folder.
 3. **Start it:**
 
    ```bash
@@ -29,10 +32,11 @@ On the machine that will host it (needs Docker with the Compose plugin):
 Open `http://<that-machine>:5555`. To use a different port, put `PORT=<number>` in the same `.env` file.
 Logs: `docker compose logs -f`.
 
-- **Data** lives in your `DATA_PATH` folder (`radio.db` inside it) and the automatic backups in `BACKUP_PATH`, so you can
-  see them, back them up with ordinary tools, and they survive rebuilds, restarts and `docker compose down -v`.
-  Keep the database on a local disk, not a network share: SQLite and network file systems don't mix. See
-  [Backups](#backups).
+- **Data** lives in `./data` (`radio.db` inside it) and the automatic backups in `./backups`, so you can see
+  them, back them up with ordinary tools, and they survive rebuilds, restarts and `docker compose down -v`. Keep
+  the project folder where you run it: if you replace it with a fresh copy, copy `data` and `backups` across
+  first. The database has to be on a local disk, not a network share: SQLite and network file systems don't mix.
+  See [Backups](#backups).
 - **Timezone** for grouping plays into days: `TZ` in `docker-compose.yml`.
 - **Poll rate**: `POLL_SECONDS` (default 60, minimum 15). Each poll also asks the provider
   for its last 10 plays, so a restart or short outage is backfilled and nothing is missed
@@ -168,7 +172,7 @@ nothing is loaded from a third party and the dashboard works without internet ac
 ## Backups
 
 **The app backs itself up.** By default it saves a snapshot of the database every 24 hours and keeps the
-newest 7, in a `backups/` folder beside the database (in Docker, the folder you set as `BACKUP_PATH`). Each is a complete SQLite
+newest 7, in a `backups/` folder beside the database (in Docker, `./backups`, or wherever `BACKUP_PATH` points). Each is a complete SQLite
 file made with SQLite's online backup, so it's consistent even while the poller is writing. (Don't copy
 `radio.db` by hand while the app is running: the copy can be corrupt.) The first one is made about 20 seconds
 after start, and the Import / Export page shows when the last one ran.
@@ -179,9 +183,9 @@ after start, and the Import / Export page shows when the last one ran.
 | `BACKUP_KEEP` | `7` | how many of the newest to keep |
 | `BACKUP_DIR` | `<data folder>/backups` | where they go |
 
-**Copy them off the machine.** If `BACKUP_PATH` is on the same disk as `DATA_PATH`, snapshots protect against
-mistakes and corruption but not against losing that disk. Put `BACKUP_PATH` on a different disk or a NAS mount
-(a network share is fine for backups, just not for the database), or copy it elsewhere. Docker Compose has no
+**Copy them off the machine.** With `./backups` beside `./data`, snapshots protect against mistakes and
+corruption but not against losing that disk. Point `BACKUP_PATH` at a different disk or a NAS mount (a network
+share is fine for backups, just not for the database), or copy the folder elsewhere. Docker Compose has no
 scheduler of its own (there's no cron in a compose file), so for that pick one of these:
 
 - **A cron job on the host** (the simplest). `crontab -e`, then either of these (`%` must be written `\%` in a
@@ -189,10 +193,10 @@ scheduler of its own (there's no cron in a compose file), so for that pick one o
 
   ```
   # a full export (every play and station), restorable through the Import page
-  0 4 * * * curl -sf -o /srv/radio-poller/backups/radio-$(date +\%F).jsonl http://localhost:5555/api/export
+  0 4 * * * curl -sf -o /path/to/radio-poller/backups/radio-$(date +\%F).jsonl http://localhost:5555/api/export
 
   # or sync the backups folder to another machine
-  0 5 * * * rsync -a /srv/radio-poller/backups/ otherhost:/backups/radio-poller/
+  0 5 * * * rsync -a /path/to/radio-poller/backups/ otherhost:/backups/radio-poller/
   ```
 - **A small extra service in `docker-compose.yml`** that does the same on a timer (not tested here, since
   Docker isn't installed on the machine this was built on). It saves a dated export into your backups folder
@@ -207,7 +211,7 @@ scheduler of its own (there's no cron in a compose file), so for that pick one o
       environment:
         ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
       volumes:
-        - "${BACKUP_PATH}:/backups"
+        - "${BACKUP_PATH:-./backups}:/backups"
       command:
         - sh
         - -c
@@ -231,13 +235,12 @@ scheduler of its own (there's no cron in a compose file), so for that pick one o
 - *From an export file* (`.jsonl`): start the app, open Import / Export and import it. It merges, so it works into
   an empty server or one that has some data. This is the easiest way and works the same everywhere.
 - *From a snapshot (`radio-….db`):* stop the app, delete `radio.db-wal` and `radio.db-shm` beside `radio.db`,
-  copy the snapshot over `radio.db`, and start the app again. In Docker, those files are in your `DATA_PATH`
-  folder and the snapshots in `BACKUP_PATH`, so with the paths from your `.env`:
+  copy the snapshot over `radio.db`, and start the app again. In Docker, run this from the project folder:
 
   ```bash
   docker compose stop
-  rm -f /srv/radio-poller/data/radio.db-wal /srv/radio-poller/data/radio.db-shm
-  cp /srv/radio-poller/backups/radio-YYYYMMDD-HHMMSS.db /srv/radio-poller/data/radio.db
+  rm -f data/radio.db-wal data/radio.db-shm
+  cp backups/radio-YYYYMMDD-HHMMSS.db data/radio.db
   docker compose start
   ```
 
@@ -283,7 +286,7 @@ Things to know:
 - The dashboard's data is public to anyone who can load the page, unless the proxy asks for a login.
 - The song data comes from iHeart's and Audacy's unofficial endpoints, and the album art loads from their
   servers. That suits personal use. Check their terms before republishing it publicly.
-- Back up the database: keep `BACKUP_PATH` on a different disk from `DATA_PATH`, and copy it off the machine too.
+- Back up the database: point `BACKUP_PATH` at a different disk from the data, and copy it off the machine too.
 
 ## Development
 
