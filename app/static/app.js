@@ -171,11 +171,12 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
   const SPOTIFY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="#1db954"/><path d="M5.5 9.2c4.2-1.2 9-.9 13 1.3M6.3 12.6c3.5-1 7.3-.7 10.4 1M7.2 15.7c2.8-.8 5.6-.5 8 .8" fill="none" stroke="#000" stroke-width="1.6" stroke-linecap="round"/></svg>';
 
   // A song when `title` is given, otherwise just the artist. With `text`, the button shows that label next to the icon.
-  function spotifyLink({ artist, title }, text = '') {
-    const song = Boolean(title);
-    const query = (song ? `${title} ${artist}` : artist).replace(/[\/\\]/g, ' ');
-    const url = `https://open.spotify.com/search/${encodeURIComponent(query)}/${song ? 'tracks' : 'artists'}`;
-    const label = song ? `Search Spotify for ${title} by ${artist}` : `Search Spotify for ${artist}`;
+  // The link goes to the server, which sends the browser to the exact Spotify page (looking the song up the first
+  // time) or, when it can't find one, to a Spotify search.
+  function spotifyLink({ artist, title, song_key: key }, text = '') {
+    const song = Boolean(title && key);
+    const url = song ? `/spotify/song?key=${encodeURIComponent(key)}` : `/spotify/artist?name=${encodeURIComponent(artist)}`;
+    const label = song ? `Open ${title} by ${artist} in Spotify` : `Open ${artist} in Spotify`;
     return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-xs ${text ? 'gap-1.5' : 'btn-square'}" title="${esc(label)}" aria-label="${esc(label)}">${SPOTIFY_ICON}${text ? `<span>${esc(text)}</span>` : ''}</a>`;
   }
 

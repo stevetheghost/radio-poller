@@ -6,6 +6,7 @@ from . import config, db
 from .backup import BackupThread
 from .poller import Poller, seed_from_file
 from .server import make_server
+from .spotify import Spotify
 
 log = logging.getLogger("radio-poller")
 
@@ -24,12 +25,14 @@ def main():
     stop = threading.Event()
     Poller(db_path, config.POLL_SECONDS, config.HISTORY_COUNT, stop).start()
 
+    spotify = Spotify(config.SPOTIFY_CLIENT_ID, config.SPOTIFY_CLIENT_SECRET) if config.SPOTIFY_CLIENT_ID and config.SPOTIFY_CLIENT_SECRET else None
     httpd = make_server(config.PORT, db_path, config.TZ_NAME, admin_token=config.ADMIN_TOKEN,
                         max_import_bytes=config.MAX_IMPORT_BYTES, read_only=config.READ_ONLY,
                         max_connections=config.MAX_CONNECTIONS, request_timeout=config.REQUEST_TIMEOUT,
                         trust_forwarded=config.TRUST_FORWARDED_FOR, backup_dir=config.BACKUP_DIR,
                         backup_every_hours=config.BACKUP_EVERY_HOURS, backup_keep=config.BACKUP_KEEP,
-                        backup_compress=config.BACKUP_COMPRESS)
+                        backup_compress=config.BACKUP_COMPRESS, spotify_client=spotify)
+    log.info("Spotify buttons: %s", "exact matches" if spotify else "search links (set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET for exact matches)")
     if config.BACKUP_EVERY_HOURS:
         BackupThread(db_path, config.BACKUP_DIR, config.BACKUP_EVERY_HOURS * 3600, config.BACKUP_KEEP, stop,
                      config.BACKUP_COMPRESS).start()

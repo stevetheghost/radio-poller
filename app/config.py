@@ -41,3 +41,8 @@ READ_ONLY = _env_bool("READ_ONLY")                  # the web interface can't ch
 MAX_CONNECTIONS = max(4, _env_int("MAX_CONNECTIONS", 64))  # simultaneous requests; more get a 503
 REQUEST_TIMEOUT = max(5, _env_int("REQUEST_TIMEOUT", 30))  # seconds a client may stay silent before it's dropped
 TRUST_FORWARDED_FOR = _env_bool("TRUST_FORWARDED_FOR")     # take the client address from a reverse proxy's X-Forwarded-For
+
+# Optional: a Spotify developer app, so the dashboard's Spotify buttons can go straight to the song or artist
+# (see the README's Spotify section). Without both, the buttons open a Spotify search instead.
+SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID", "").strip()
+SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", "").strip()

@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import backup, config, db, detect, queries, transfer
+from . import backup, config, db, detect, queries, spotify, transfer
 from .security import FailureLimiter
 from . import stations as station_admin
 
@@ -183,6 +183,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, (STATIC_DIR / name).read_bytes(), ctype)
             if url.path.startswith("/api/") or url.path == "/health":
                 return self._api(url.path, params)
+            if url.path in ("/spotify/song", "/spotify/artist"):
+                return self._spotify(url.path, params)
             self._json({"error": "not found"}, 404)
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -393,6 +395,23 @@ class Handler(BaseHTTPRequestHandler):
         for chunk in transfer.export_lines(conn, now, station, plays):
             self.wfile.write(chunk)
 
+    def _spotify(self, path, params):
+        """The Spotify buttons: send the browser to the song's or artist's Spotify page. The first use of a
+        song looks it up on Spotify (and remembers the answer), which is why this is a redirect rather than a
+        link the page can build itself. Only songs and artists already in the history are looked up."""
+        if path == "/spotify/song":
+            target = spotify.song_url(self.server.db_path, self.server.spotify, params.get("key", "")[:300])
+        else:
+            target = spotify.artist_url(self.server.db_path, self.server.spotify, params.get("name", "")[:300])
+        if target is None:
+            return self._json({"error": "unknown song or artist"}, 404)
+        self.send_response(302)
+        self.send_header("Location", target)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self._security_headers()
+        self.end_headers()
+
     def _timezone_for(self, conn, p):
         """Days and hours are grouped in the picked station's own timezone; across all stations, in the server's."""
         if p.get("station"):
@@ -461,7 +480,7 @@ class Handler(BaseHTTPRequestHandler):
 def make_server(port, db_path, tz_name, host="0.0.0.0", admin_token="", max_import_bytes=config.MAX_IMPORT_BYTES,
                 read_only=False, max_connections=config.MAX_CONNECTIONS, request_timeout=config.REQUEST_TIMEOUT,
                 trust_forwarded=config.TRUST_FORWARDED_FOR, backup_dir=None, backup_every_hours=0, backup_keep=7,
-                backup_compress=True):
+                backup_compress=True, spotify_client=None):
     handler = type("TimedHandler", (Handler,), {"timeout": request_timeout})
     httpd = BoundedServer((host, port), handler, max_connections)
     httpd.db_path = db_path
@@ -474,4 +493,5 @@ def make_server(port, db_path, tz_name, host="0.0.0.0", admin_token="", max_impo
     httpd.limiter = FailureLimiter()
     httpd.backup_dir, httpd.backup_every_hours, httpd.backup_keep = backup_dir, backup_every_hours, backup_keep
     httpd.backup_compress = backup_compress
+    httpd.spotify = spotify_client  # a spotify.Spotify, or None to send the buttons to Spotify's search page
     return httpd

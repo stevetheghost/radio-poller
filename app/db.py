@@ -42,6 +42,22 @@ CREATE TABLE IF NOT EXISTS plays (
     UNIQUE (station_id, played_at, song_key)
 );
 
+-- Spotify matches, filled in the first time a song's or artist's Spotify button is used (see spotify.py).
+-- A NULL id means Spotify had nothing trustworthy; it's searched again after a while. Nothing here is a secret.
+CREATE TABLE IF NOT EXISTS spotify_tracks (
+    song_key   TEXT PRIMARY KEY,
+    track_id   TEXT,
+    name       TEXT,                           -- "Artist - Title" as Spotify names it, to check matches by eye
+    matched_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spotify_artists (
+    artist_key TEXT PRIMARY KEY,               -- the artist's name, case-folded
+    artist_id  TEXT,
+    name       TEXT,
+    matched_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS plays_station_time ON plays (station_id, played_at);
 CREATE INDEX IF NOT EXISTS plays_song_time ON plays (song_key, played_at);
 CREATE INDEX IF NOT EXISTS plays_time ON plays (played_at);

@@ -165,10 +165,9 @@ heard, in a scrolling card with its own station, sort (most played / most recent
 inclusive, in the station's own timezone. It starts with the first 200 songs and **Show more** adds 200 at a time.
 
 **Open in Spotify** buttons (the green Spotify icon) sit on Now playing, Top songs, Top artists, Station songs and
-the song details. They open a Spotify *search* for that song or artist in a new tab (`open.spotify.com/search/…`), so
-they need no Spotify account or API key and send nothing from this server to Spotify; you tap the result once in
-Spotify. They search by the artist and title the radio feed gave, so an odd title (a "Radio Edit" suffix, say) can
-miss.
+the song details. Out of the box they open a Spotify *search* for that song or artist in a new tab, so you tap the
+result once in Spotify. Give the app a Spotify developer app (see [Spotify](#spotify)) and they go straight to the
+song or artist instead.
 
 Further down, three cards follow the same filters:
 
@@ -196,6 +195,39 @@ nothing is loaded from a third party and the dashboard works without internet ac
 `threads`, `requests_active` / `requests_max`, and on Linux `container_pids` / `container_pids_max`). Most accept `station`,
 `range` (`24h`, `7d`, `30d`, `90d`, `180d`, `365d`, `all`), `q`, and `limit`. Instead of a preset they also take
 `from_date` / `to_date` (`YYYY-MM-DD`, inclusive, in the station's timezone).
+
+## Spotify
+
+The Spotify buttons work with no setup (they open a Spotify search), but they can go straight to the exact song or
+artist. For that the app searches Spotify using **your own Spotify developer app**; it never logs in as you and
+sends Spotify nothing but the artist and title it is looking up.
+
+1. At [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) (a Premium account is needed to own
+   an app) choose **Create app**, tick **Web API**, and give it any name and a redirect URI such as
+   `http://127.0.0.1:5555/callback` (the form requires one; matching doesn't use it).
+2. Copy the app's **Client ID** and **Client secret** into `.env`, next to `docker-compose.yml`
+   (see `.env.example`), then `docker compose up -d` to apply them:
+
+   ```
+   SPOTIFY_CLIENT_ID=...
+   SPOTIFY_CLIENT_SECRET=...
+   ```
+
+How it works: the buttons link to `/spotify/song?key=...` and `/spotify/artist?name=...` on this server, which look
+the song up on Spotify the *first time* someone clicks it, remember the answer in the database (the
+`spotify_tracks` and `spotify_artists` tables, which hold no secrets), and redirect. After that a click is instant
+and makes no request to Spotify. Only songs and artists already in the history are ever looked up.
+
+- **Matching** needs the same title and one of the same artists, ignoring case, accents and punctuation, and
+  "(Radio Edit)", "[Remix]" or "- Remastered" style tags. Live, karaoke, tribute and similar recordings lose to the
+  studio one. On a test of about 240 real songs from this app it found 98%.
+- **When there's no match** (the radio's title isn't Spotify's, say), or Spotify is unreachable, rate-limiting
+  the app or refusing the credentials, the button opens the Spotify search instead, so it always lands somewhere
+  useful. Songs with no match are searched for again after 14 days; failures aren't remembered at all.
+- **Rate limits.** An app in development mode has a request quota that Spotify doesn't publish. It is plenty for
+  clicking buttons, but looking up hundreds of songs in a burst can use it up, after which Spotify refuses the app
+  for up to about a day (the buttons fall back to search in the meantime). The app honours the wait Spotify asks for.
+- If the credentials are wrong, the log says so (`docker compose logs`).
 
 ## Backups
 

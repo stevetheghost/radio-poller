@@ -18,6 +18,10 @@ services:
       # BACKUP_EVERY_HOURS: "24"  # automatic database snapshots (0 = off)
       # BACKUP_KEEP: "7"          # how many of the newest snapshots to keep
       # BACKUP_COMPRESS: "1"      # gzip the snapshots (0 = save plain .db files)
+      # Optional: a Spotify developer app, so the Spotify buttons go straight to the song or artist rather than to a
+      # search. Put both values in .env (see .env.example), not here.
+      SPOTIFY_CLIENT_ID: "${SPOTIFY_CLIENT_ID:-}"
+      SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET:-}"
       # --- for a server that strangers can reach: see "Running on a public server" in the README ---
       # ADMIN_TOKEN: ""         # if set, importing, exporting and changing stations require this token
       # READ_ONLY: "1"          # the web interface can't change anything at all
