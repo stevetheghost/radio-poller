@@ -72,21 +72,55 @@ class BoundedServer(ThreadingHTTPServer):
     def __init__(self, address, handler, max_connections):
         super().__init__(address, handler)
         self._slots = threading.BoundedSemaphore(max_connections)
+        self._max_connections = max_connections
+        self._busy = 0
+        self._busy_lock = threading.Lock()
+        self._last_thread_warning = float("-inf")
+
+    def _count(self, change):
+        with self._busy_lock:
+            self._busy += change
+
+    def load(self):
+        """How many threads the app has, for /health: the ones in this process, how many of them are
+        serving a request right now, and (on Linux) the container's own count against its limit."""
+        info = {"threads": threading.active_count(), "requests_active": self._busy, "requests_max": self._max_connections}
+        for key, name in (("container_pids", "pids.current"), ("container_pids_max", "pids.max")):
+            try:
+                with open("/sys/fs/cgroup/" + name) as fh:
+                    text = fh.read().strip()
+                info[key] = int(text) if text.isdigit() else None  # "max" means no limit
+            except OSError:
+                pass
+        return info
+
+    def _refuse(self, request):
+        try:
+            request.sendall(b"HTTP/1.0 503 Service Unavailable\r\nRetry-After: 5\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        except OSError:
+            pass
+        self.shutdown_request(request)
 
     def process_request(self, request, client_address):
         if not self._slots.acquire(blocking=False):
-            try:
-                request.sendall(b"HTTP/1.0 503 Service Unavailable\r\nRetry-After: 5\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            except OSError:
-                pass
-            self.shutdown_request(request)
-            return
-        super().process_request(request, client_address)
+            return self._refuse(request)
+        self._count(1)
+        try:
+            super().process_request(request, client_address)
+        except RuntimeError as exc:  # "can't start new thread": the host or container is out of threads
+            self._slots.release()  # the thread that would have freed this slot never ran
+            self._count(-1)
+            now = time.monotonic()
+            if now - self._last_thread_warning > 60:
+                self._last_thread_warning = now
+                log.warning("could not start a request thread (%s); answering 503 until threads free up", exc)
+            self._refuse(request)
 
     def process_request_thread(self, request, client_address):
         try:
             super().process_request_thread(request, client_address)
         finally:
+            self._count(-1)
             self._slots.release()
 
 
@@ -374,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
         db.add_time_functions(conn, tz)
         try:
             if path == "/health":
-                return self._json(queries.health(conn))
+                return self._json({**queries.health(conn), **self.server.load()})
             if path == "/api/stations":
                 return self._json({"tz": self.server.tz_name, "now": now, "stations": queries.stations(conn)})
             if path == "/api/export":  # a full copy of the data, and the heaviest request the server serves

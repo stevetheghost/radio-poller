@@ -181,7 +181,8 @@ nothing is loaded from a third party and the dashboard works without internet ac
 
 `/api/stations`, `/api/summary`, `/api/top-songs`, `/api/top-artists`, `/api/recent`,
 `/api/timeseries`, `/api/heatmap`, `/api/changes`, `/api/compare?a=&b=`, `/api/now-playing`, `/api/transfer-info`,
-`/api/song?key=`, `/api/export`, `POST /api/import`, `/health`. Most accept `station`,
+`/api/song?key=`, `/api/export`, `POST /api/import`, `/health` (also reports live thread counts:
+`threads`, `requests_active` / `requests_max`, and on Linux `container_pids` / `container_pids_max`). Most accept `station`,
 `range` (`24h`, `7d`, `30d`, `90d`, `365d`, `all`), `q`, and `limit`.
 
 ## Backups

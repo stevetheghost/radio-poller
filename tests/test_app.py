@@ -358,7 +358,11 @@ class ServerTests(unittest.TestCase):
         return urlopen(self.base + path, timeout=5).read()
 
     def test_endpoints(self):
-        self.assertTrue(json.loads(self.get("/health"))["ok"])
+        health = json.loads(self.get("/health"))
+        self.assertTrue(health["ok"])
+        self.assertGreaterEqual(health["threads"], 1)
+        self.assertEqual(health["requests_active"], 1)  # this very request
+        self.assertGreaterEqual(health["requests_max"], 4)
         self.assertEqual(json.loads(self.get("/api/summary?range=24h"))["plays"], 1)
         np = json.loads(self.get("/api/now-playing?station=a"))
         self.assertEqual(np["stations"][0]["title"], "Hello")

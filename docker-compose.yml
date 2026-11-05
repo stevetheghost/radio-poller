@@ -30,7 +30,7 @@ services:
       - "${DATA_PATH:-./data}:/data"             # the SQLite database
       - "${BACKUP_PATH:-./backups}:/backups"     # automatic snapshots
       - ./config:/config:ro     # stations.json: the starting stations, read on the first run only
-    mem_limit: 128m
+    mem_limit: 512m
     cpus: 0.25
     pids_limit: 256
     # The app only writes to /data and /backups, so the rest of the container can be locked down.

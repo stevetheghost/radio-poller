@@ -184,6 +184,20 @@ class LimitsTests(Base):
             time.sleep(0.1)
         self.assertEqual(self.call(base, "GET", "/health")[0], 200)
 
+    def test_running_out_of_threads_gives_a_503_and_does_not_leak_slots(self):
+        base, _ = self.start(max_connections=2)
+        real_start = threading.Thread.start
+
+        def no_threads(thread):
+            if thread.name.startswith("Thread-") and "process_request_thread" in repr(thread._target):
+                raise RuntimeError("can't start new thread")
+            return real_start(thread)
+
+        with mock.patch.object(threading.Thread, "start", no_threads):
+            for _ in range(5):  # more failures than there are slots
+                self.assertEqual(self.call(base, "GET", "/health")[0], 503)
+        self.assertEqual(self.call(base, "GET", "/health")[0], 200)  # every slot was given back
+
     def test_a_silent_client_is_dropped_after_the_timeout(self):
         base, port = self.start(request_timeout=1)
         sock = self.open_idle(port)
