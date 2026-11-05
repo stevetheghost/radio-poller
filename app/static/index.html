@@ -79,7 +79,7 @@
           <h2 class="card-title text-base">Top songs</h2>
           <div class="overflow-x-auto">
             <table class="table table-sm">
-              <thead><tr><th class="w-8">#</th><th>Song</th><th class="w-16 sm:w-44">Plays</th><th class="hidden sm:table-cell text-right">Last played</th></tr></thead>
+              <thead><tr><th class="w-8">#</th><th>Song</th><th class="w-16 sm:w-44">Plays</th><th class="hidden sm:table-cell text-right">Last played</th><th class="w-10"><span class="sr-only">Open in Spotify</span></th></tr></thead>
               <tbody id="songs"></tbody>
             </table>
           </div>
@@ -91,13 +91,48 @@
           <h2 class="card-title text-base">Top artists</h2>
           <div class="overflow-x-auto">
             <table class="table table-sm">
-              <thead><tr><th class="w-8">#</th><th>Artist</th><th class="text-right">Plays</th></tr></thead>
+              <thead><tr><th class="w-8">#</th><th>Artist</th><th class="text-right">Plays</th><th class="w-10"><span class="sr-only">Open in Spotify</span></th></tr></thead>
               <tbody id="artists"></tbody>
             </table>
           </div>
         </div>
       </section>
     </div>
+
+    <section class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="card-title text-base mr-2">Station songs</h2>
+          <select id="ss-station" class="select select-sm w-auto" aria-label="Station"></select>
+          <select id="ss-sort" class="select select-sm w-auto" aria-label="Sort by">
+            <option value="plays">Most played</option>
+            <option value="recent">Most recent</option>
+            <option value="az">A–Z</option>
+          </select>
+        </div>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div id="ss-ranges" role="tablist" class="tabs tabs-box tabs-sm flex-wrap">
+            <button role="tab" class="tab" data-range="24h">24h</button>
+            <button role="tab" class="tab" data-range="7d">1 week</button>
+            <button role="tab" class="tab" data-range="30d">1 month</button>
+            <button role="tab" class="tab" data-range="90d">3 months</button>
+            <button role="tab" class="tab" data-range="180d">6 months</button>
+            <button role="tab" class="tab" data-range="365d">1 year</button>
+            <button role="tab" class="tab" data-range="all">All time</button>
+          </div>
+          <label class="flex items-center gap-1.5 text-sm"><span class="opacity-70">From</span><input id="ss-from" type="date" class="input input-sm w-auto"></label>
+          <label class="flex items-center gap-1.5 text-sm"><span class="opacity-70">To</span><input id="ss-to" type="date" class="input input-sm w-auto"></label>
+        </div>
+        <p id="ss-caption" class="text-xs opacity-60 -mt-1"></p>
+        <div class="overflow-auto max-h-96 rounded-box border border-base-300">
+          <table class="table table-sm table-pin-rows">
+            <thead><tr><th class="w-8">#</th><th>Song</th><th class="text-right">Plays</th><th class="hidden sm:table-cell text-right">Last played</th><th class="w-10"><span class="sr-only">Open in Spotify</span></th></tr></thead>
+            <tbody id="ss-songs"></tbody>
+          </table>
+        </div>
+        <button id="ss-more" class="btn btn-sm self-start hidden">Show more</button>
+      </div>
+    </section>
 
     <div class="stats stats-vertical sm:stats-horizontal bg-base-100 border border-base-300">
       <div class="stat"><div class="stat-title">Plays</div><div id="stat-plays" class="stat-value">–</div></div>
@@ -189,6 +224,7 @@
     <form method="dialog"><button class="btn btn-sm btn-circle btn-ghost absolute right-3 top-3" aria-label="Close">✕</button></form>
     <h3 id="song-title" class="text-lg font-semibold pr-8"></h3>
     <p id="song-artist" class="opacity-70"></p>
+    <div id="song-spotify" class="mt-2"></div>
     <div id="song-stats" class="mt-3 text-sm flex flex-wrap gap-x-6 gap-y-1"></div>
     <div id="song-chart" class="chart relative mt-4"></div>
     <div id="song-legend" class="flex flex-wrap gap-x-4 gap-y-1 text-sm mt-1"></div>

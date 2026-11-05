@@ -7,12 +7,14 @@
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const TOP_PAGE = 10;     // top songs shown at first, and added by each "Show more"
   const RECENT_PAGE = 25;
+  const SS_PAGE = 200;     // station songs fetched at first, and added by each "Show more"
 const CHANGES_PAGE = 10;
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
   const state = { station: '', range: '7d', q: '', songLimit: TOP_PAGE, recentLimit: RECENT_PAGE, changeLimit: CHANGES_PAGE,
-                  compareLimit: CHANGES_PAGE, compareA: '', compareB: '', stations: [], tz: '' };
+                  compareLimit: CHANGES_PAGE, compareA: '', compareB: '', stations: [], tz: '',
+                  ss: { station: null, range: '30d', from: '', to: '', sort: 'plays', limit: SS_PAGE } };
   let refreshToken = 0;
 
   const seriesColor = (slot) => `var(--series-${(slot % 8) + 1})`;  // a station's slot never changes when you reorder
@@ -164,6 +166,19 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
     el.innerHTML = `<table class="table table-xs table-pin-rows"><thead><tr><th>${data.bucket === 'hour' ? 'Hour' : 'Day'}</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
   }
 
+  // ---- Spotify links (a search on open.spotify.com: no account or API key involved) ----------
+
+  const SPOTIFY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="12" fill="#1db954"/><path d="M5.5 9.2c4.2-1.2 9-.9 13 1.3M6.3 12.6c3.5-1 7.3-.7 10.4 1M7.2 15.7c2.8-.8 5.6-.5 8 .8" fill="none" stroke="#000" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+  // A song when `title` is given, otherwise just the artist. With `text`, the button shows that label next to the icon.
+  function spotifyLink({ artist, title }, text = '') {
+    const song = Boolean(title);
+    const query = (song ? `${title} ${artist}` : artist).replace(/[\/\\]/g, ' ');
+    const url = `https://open.spotify.com/search/${encodeURIComponent(query)}/${song ? 'tracks' : 'artists'}`;
+    const label = song ? `Search Spotify for ${title} by ${artist}` : `Search Spotify for ${artist}`;
+    return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-xs ${text ? 'gap-1.5' : 'btn-square'}" title="${esc(label)}" aria-label="${esc(label)}">${SPOTIFY_ICON}${text ? `<span>${esc(text)}</span>` : ''}</a>`;
+  }
+
   // ---- sections -------------------------------------------------------------
 
   const empty = (cols, msg) => `<tr><td colspan="${cols}" class="text-center opacity-60 py-6">${msg}</td></tr>`;
@@ -177,7 +192,8 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
         <td><div class="flex items-center gap-2"><span class="w-8 text-right tabular-nums">${nf.format(r.plays)}</span>
           <span class="hidden sm:inline-block h-1.5 rounded-sm" style="width:${Math.max(2, (r.plays / max) * 100)}%;max-width:7rem;background:var(--series-1)"></span></div></td>
         <td class="hidden sm:table-cell text-right text-sm opacity-70 whitespace-nowrap">${fmtTime(r.last_played, r.last_station_id)}</td>
-      </tr>`).join('') : empty(4, 'No plays match.');
+        <td class="text-right">${spotifyLink(r)}</td>
+      </tr>`).join('') : empty(5, 'No plays match.');
     $('more-songs').classList.toggle('hidden', rows.length < state.songLimit);
   }
 
@@ -186,7 +202,8 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
       <tr class="hover:bg-base-200 cursor-pointer" data-artist="${esc(r.artist)}">
         <td class="opacity-60">${i + 1}</td>
         <td>${esc(r.artist)}<div class="text-xs opacity-60">${r.songs} song${r.songs === 1 ? '' : 's'}</div></td>
-        <td class="text-right tabular-nums">${nf.format(r.plays)}</td></tr>`).join('') : empty(3, 'No plays match.');
+        <td class="text-right tabular-nums">${nf.format(r.plays)}</td>
+        <td class="text-right">${spotifyLink({ artist: r.artist })}</td></tr>`).join('') : empty(4, 'No plays match.');
   }
 
   const stationDot = (id) => {
@@ -257,7 +274,8 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1">${status(s)}<span class="inline-flex items-center gap-1.5 text-sm opacity-70">${stationDot(s.station_id)}${esc(s.station_name)}</span></div>
           <div class="text-xl font-semibold mt-1 break-words">${esc(s.title)}</div>
           <div class="opacity-70 break-words">${esc(s.artist)}</div>
-          <div class="text-sm opacity-60 mt-1">${fmtTime(s.played_at, s.station_id)}</div>        </div></div>`;
+          <div class="text-sm opacity-60 mt-1">${fmtTime(s.played_at, s.station_id)}</div>
+          <div class="mt-2 flex flex-wrap gap-1">${spotifyLink(s, 'Open in Spotify')}${spotifyLink({ artist: s.artist }, 'Open artist')}</div></div></div>`;
       return;
     }
 
@@ -266,12 +284,78 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
         <div class="flex items-center justify-between gap-2 mb-1">
           <span class="inline-flex items-center gap-1.5 text-sm font-medium">${stationDot(s.station_id)}${esc(s.station_name)}</span>${status(s)}
         </div>
-        <div class="font-semibold break-words">${esc(s.title)}</div>
-        <div class="text-sm opacity-70 break-words">${esc(s.artist)}</div>      </div>` : `
+        <div class="flex items-end justify-between gap-2">
+          <div class="min-w-0"><div class="font-semibold break-words">${esc(s.title)}</div>
+            <div class="text-sm opacity-70 break-words">${esc(s.artist)}</div></div>
+          ${spotifyLink(s)}</div></div>` : `
       <div class="rounded-box border border-base-300 p-3">
         <span class="inline-flex items-center gap-1.5 text-sm font-medium">${stationDot(s.station_id)}${esc(s.station_name)}</span>
         <div class="text-sm opacity-60 mt-1">Nothing logged yet.</div>
       </div>`).join('')}</div>`;
+  }
+
+  // ---- station songs ----------------------------------------------------------
+
+  let ssToken = 0, ssSignature = '';
+
+  function syncSongStations() {
+    const ss = state.ss, ids = state.stations.map((x) => x.id);
+    if (ss.station === null) ss.station = state.station || (state.stations.find((x) => x.active) || state.stations[0] || {}).id || '';
+    if (ss.station && !ids.includes(ss.station)) ss.station = '';
+    const signature = state.stations.map((x) => `${x.id}|${x.name}|${x.active}`).join(',');
+    if (signature !== ssSignature) {  // rebuilding the list would close one the user has open
+      ssSignature = signature;
+      $('ss-station').innerHTML = '<option value="">All stations</option>' +
+        state.stations.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}${x.active ? '' : ' (paused)'}</option>`).join('');
+    }
+    $('ss-station').value = ss.station;
+  }
+
+  function syncSongControls() {
+    const ss = state.ss, custom = Boolean(ss.from || ss.to);
+    document.querySelectorAll('#ss-ranges .tab').forEach((b) => {
+      const on = !custom && b.dataset.range === ss.range;
+      b.classList.toggle('tab-active', on);
+      b.setAttribute('aria-selected', on);
+    });
+    $('ss-from').value = ss.from; $('ss-to').value = ss.to;
+    $('ss-from').max = ss.to; $('ss-to').min = ss.from;  // the browser stops "from" landing after "to"
+    $('ss-sort').value = ss.sort;
+  }
+
+  async function loadStationSongs() {
+    const token = ++ssToken, ss = state.ss;
+    syncSongStations(); syncSongControls();
+    const custom = Boolean(ss.from || ss.to);
+    try {
+      const data = await api('/api/station-songs', {
+        station: ss.station, sort: ss.sort, limit: ss.limit,
+        ...(custom ? { from_date: ss.from, to_date: ss.to } : { range: ss.range }),
+      });
+      if (token === ssToken) renderStationSongs(data, custom);
+    } catch (err) {
+      console.error(err);
+      if (token === ssToken) $('ss-songs').innerHTML = empty(5, 'Could not load the songs.');
+    }
+  }
+
+  function renderStationSongs(data, custom) {
+    const ss = state.ss;
+    $('ss-songs').innerHTML = data.songs.length ? data.songs.map((r, i) => `
+      <tr class="hover:bg-base-200 cursor-pointer" data-key="${esc(r.song_key)}">
+        <td class="opacity-60">${i + 1}</td>
+        <td><div class="font-medium">${esc(r.title)}</div><div class="text-xs opacity-60">${esc(r.artist)}</div></td>
+        <td class="text-right tabular-nums">${nf.format(r.plays)}</td>
+        <td class="hidden sm:table-cell text-right text-sm opacity-70 whitespace-nowrap">${fmtTime(r.last_played, r.last_station_id)}</td>
+        <td class="text-right">${spotifyLink(r)}</td>
+      </tr>`).join('') : empty(5, 'No songs in this range.');
+    const shown = data.songs.length;
+    $('ss-caption').textContent = data.total
+      ? `${nf.format(data.total)} song${data.total === 1 ? '' : 's'} · ${nf.format(data.plays)} play${data.plays === 1 ? '' : 's'}` +
+        (shown < data.total ? ` · showing the first ${nf.format(shown)}` : '') +
+        (custom ? ` · dates in ${zoneName(stationZone(ss.station))}` : '')
+      : '';
+    $('ss-more').classList.toggle('hidden', shown >= data.total);
   }
 
   // ---- when it plays: weekday x hour heatmap ---------------------------------
@@ -480,6 +564,7 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
       renderHeat(heat);
       renderChanges(changes);
       loadCompare();
+      loadStationSongs();
     } catch (err) {
       console.error(err);
       $('health').textContent = 'Could not reach the server';
@@ -496,6 +581,7 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
     const modal = $('song-modal');
     modal.showModal();
     $('song-title').textContent = 'Loading…';
+    $('song-spotify').innerHTML = '';
     try {
       const [info, ts, plays] = await Promise.all([
         api('/api/song', { key }),
@@ -504,6 +590,7 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
       ]);
       $('song-title').textContent = info.title;
       $('song-artist').textContent = info.artist;
+      $('song-spotify').innerHTML = spotifyLink(info, 'Open in Spotify') + ' ' + spotifyLink({ artist: info.artist }, 'Open artist');
       $('song-stats').innerHTML =
         `<span><b>${nf.format(info.plays)}</b> plays</span><span>First: ${fmtTime(info.first_played, info.first_station_id)}</span><span>Last: ${fmtTime(info.last_played, info.last_station_id)}</span>` +
         info.stations.map((s) => `<span class="inline-flex items-center gap-1.5">${stationDot(s.station_id)}${esc(s.station_name)}: <b>${s.plays}</b></span>`).join('');
@@ -535,22 +622,45 @@ const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satu
     if (!b) return;
     state.range = b.dataset.range; resetPaging(); setActiveRange(); refresh();
   });
-  $('station').addEventListener('change', (e) => { state.station = e.target.value; resetPaging(); refresh(); });
+  $('station').addEventListener('change', (e) => {
+    state.station = e.target.value;
+    if (state.station) { state.ss.station = state.station; state.ss.limit = SS_PAGE; }  // the song list follows the page's station
+    resetPaging(); refresh();
+  });
   let qTimer;
   $('q').addEventListener('input', (e) => {
     clearTimeout(qTimer);
     qTimer = setTimeout(() => { state.q = e.target.value.trim(); resetPaging(); refresh(); }, 300);
   });
-  $('now-playing').addEventListener('click', (e) => { const el = e.target.closest('[data-key]'); if (el) openSong(el.dataset.key); });
+  $('now-playing').addEventListener('click', (e) => { if (e.target.closest('a')) return; const el = e.target.closest('[data-key]'); if (el) openSong(el.dataset.key); });
   $('now-playing').addEventListener('error', (e) => {  // broken or blocked artwork falls back to the placeholder tile
     if (e.target.tagName === 'IMG') e.target.outerHTML = ART_PLACEHOLDER;
   }, true);
-  $('songs').addEventListener('click', (e) => { const tr = e.target.closest('[data-key]'); if (tr) openSong(tr.dataset.key); });
+  $('songs').addEventListener('click', (e) => { if (e.target.closest('a')) return; const tr = e.target.closest('[data-key]'); if (tr) openSong(tr.dataset.key); });
   $('artists').addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
     const tr = e.target.closest('[data-artist]');
     if (!tr) return;
     $('q').value = state.q = tr.dataset.artist; resetPaging(); refresh();
   });
+  // The station songs card has its own station, range and sort, so it can be looked at apart from the page's filters.
+  $('ss-station').addEventListener('change', (e) => { state.ss.station = e.target.value; state.ss.limit = SS_PAGE; loadStationSongs(); });
+  $('ss-sort').addEventListener('change', (e) => { state.ss.sort = e.target.value; state.ss.limit = SS_PAGE; loadStationSongs(); });
+  $('ss-ranges').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-range]');
+    if (!b) return;
+    Object.assign(state.ss, { range: b.dataset.range, from: '', to: '', limit: SS_PAGE }); loadStationSongs();
+  });
+  for (const id of ['ss-from', 'ss-to']) {
+    $(id).addEventListener('change', () => {
+      Object.assign(state.ss, { from: $('ss-from').value, to: $('ss-to').value, limit: SS_PAGE });
+      if (!state.ss.from && !state.ss.to) state.ss.range = 'all';  // clearing both dates leaves no range chosen, so show everything
+      loadStationSongs();
+    });
+  }
+  $('ss-more').addEventListener('click', () => { state.ss.limit += SS_PAGE; loadStationSongs(); });
+  $('ss-songs').addEventListener('click', (e) => { if (e.target.closest('a')) return; const tr = e.target.closest('[data-key]'); if (tr) openSong(tr.dataset.key); });
+
   $('more-songs').addEventListener('click', () => { state.songLimit += TOP_PAGE; refresh(); });
   $('more-recent').addEventListener('click', () => { state.recentLimit += RECENT_PAGE; refresh(); });
   $('more-changes').addEventListener('click', () => { state.changeLimit += CHANGES_PAGE; refresh(); });

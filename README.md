@@ -159,6 +159,17 @@ Filter by station, range (24h / 7 / 30 / 90 days / all) and search text. Click a
 history, a per-day chart and a per-station breakdown; click an artist to filter to them.
 For a copy of the data, use Import / Export.
 
+**Station songs** lists every distinct song a station played in a range, with its play count and when it was last
+heard, in a scrolling card with its own station, sort (most played / most recent / A–Z) and range. Pick a preset
+(24h, 1 week, 1 month, 3 months, 6 months, 1 year, all time) or type a From / To date; both dates are whole days,
+inclusive, in the station's own timezone. It starts with the first 200 songs and **Show more** adds 200 at a time.
+
+**Open in Spotify** buttons (the green Spotify icon) sit on Now playing, Top songs, Top artists, Station songs and
+the song details. They open a Spotify *search* for that song or artist in a new tab (`open.spotify.com/search/…`), so
+they need no Spotify account or API key and send nothing from this server to Spotify; you tap the result once in
+Spotify. They search by the artist and title the radio feed gave, so an odd title (a "Radio Edit" suffix, say) can
+miss.
+
 Further down, three cards follow the same filters:
 
 - **When it plays**: a weekday-by-hour heatmap of plays, in the station's own timezone (the server's `TZ` when
@@ -180,10 +191,11 @@ nothing is loaded from a third party and the dashboard works without internet ac
 ## API
 
 `/api/stations`, `/api/summary`, `/api/top-songs`, `/api/top-artists`, `/api/recent`,
-`/api/timeseries`, `/api/heatmap`, `/api/changes`, `/api/compare?a=&b=`, `/api/now-playing`, `/api/transfer-info`,
+`/api/station-songs` (every distinct song in the range; also `sort=plays|recent|az`), `/api/timeseries`, `/api/heatmap`, `/api/changes`, `/api/compare?a=&b=`, `/api/now-playing`, `/api/transfer-info`,
 `/api/song?key=`, `/api/export`, `POST /api/import`, `/health` (also reports live thread counts:
 `threads`, `requests_active` / `requests_max`, and on Linux `container_pids` / `container_pids_max`). Most accept `station`,
-`range` (`24h`, `7d`, `30d`, `90d`, `365d`, `all`), `q`, and `limit`.
+`range` (`24h`, `7d`, `30d`, `90d`, `180d`, `365d`, `all`), `q`, and `limit`. Instead of a preset they also take
+`from_date` / `to_date` (`YYYY-MM-DD`, inclusive, in the station's timezone).
 
 ## Backups
 

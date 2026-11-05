@@ -2,7 +2,7 @@
 import time
 from datetime import datetime, timedelta
 
-DAY_RANGES = {"7d": 7, "30d": 30, "90d": 90, "365d": 365}
+DAY_RANGES = {"7d": 7, "30d": 30, "90d": 90, "180d": 180, "365d": 365}
 MAX_HOURLY_SPAN = 14 * 86400
 
 
@@ -18,15 +18,29 @@ def _local_midnight(now, tz, days_back):
     return int((day - timedelta(days=days_back)).timestamp())
 
 
+def _date_start(value, tz, days=0):
+    """Local midnight of a YYYY-MM-DD date in `tz` (plus `days` days) as unix seconds, or None if it isn't a date."""
+    try:
+        day = datetime.strptime(value, "%Y-%m-%d") + timedelta(days=days)
+        return max(0, min(10 ** 11, int(day.replace(tzinfo=tz).timestamp())))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
 def resolve_range(params, tz, now):
     """Returns (start, end) as unix seconds; None means unbounded. Day presets start
-    at local midnight so the first day's bucket is complete."""
+    at local midnight so the first day's bucket is complete. `from_date` / `to_date` (YYYY-MM-DD,
+    both inclusive, in the zone) pick whole days; `from` / `to` (unix seconds) override everything."""
     rng = params.get("range", "all")
     start = end = None
     if rng == "24h":
         start = now - 86400
     elif rng in DAY_RANGES:
         start = _local_midnight(now, tz, DAY_RANGES[rng] - 1)
+    if params.get("from_date"):
+        start = _date_start(params["from_date"], tz)
+    if params.get("to_date"):
+        end = _date_start(params["to_date"], tz, days=1)
     if "from" in params:
         start = int_param(params, "from", start, 0, 10 ** 11)
     if "to" in params:
@@ -111,6 +125,33 @@ def top_songs(conn, params, tz, now):
                               (song["song_key"], song["last_played"])).fetchone()
         song["last_station_id"] = latest["station_id"] if latest else None
     return songs
+
+
+SONG_SORTS = {
+    "plays": "plays DESC, last_played DESC",
+    "recent": "last_played DESC",
+    "az": "lower(title), lower(artist)",
+}
+
+
+def station_songs(conn, params, tz, now):
+    """Every distinct song in the filtered range (usually one station), with its play count and when it was
+    first and last heard. `total` and `plays` cover the whole range; `songs` is the first `limit` of them."""
+    where, args, _, _ = build_where(params, tz, now)
+    limit = int_param(params, "limit", 200, 1, 2000)
+    order = SONG_SORTS.get(params.get("sort"), SONG_SORTS["plays"])
+    counts = conn.execute(
+        f"SELECT COUNT(*) AS plays, COUNT(DISTINCT p.song_key) AS songs FROM plays p{where}", args
+    ).fetchone()
+    rows = conn.execute(
+        f"""SELECT g.*, (SELECT station_id FROM plays WHERE song_key = g.song_key AND played_at = g.last_played LIMIT 1) AS last_station_id
+            FROM (SELECT MIN(p.artist) AS artist, MIN(p.title) AS title, p.song_key, COUNT(*) AS plays,
+                         MIN(p.played_at) AS first_played, MAX(p.played_at) AS last_played
+                  FROM plays p{where} GROUP BY p.song_key) g
+            ORDER BY {order}, g.song_key LIMIT ?""",
+        args + [limit],
+    ).fetchall()
+    return {"total": counts["songs"], "plays": counts["plays"], "songs": [dict(r) for r in rows]}
 
 
 def top_artists(conn, params, tz, now):

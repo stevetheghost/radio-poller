@@ -435,6 +435,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(queries.summary(conn, p, tz, now))
             if path == "/api/top-songs":
                 return self._json(queries.top_songs(conn, p, tz, now))
+            if path == "/api/station-songs":
+                return self._json(queries.station_songs(conn, p, tz, now))
             if path == "/api/top-artists":
                 return self._json(queries.top_artists(conn, p, tz, now))
             if path == "/api/recent":

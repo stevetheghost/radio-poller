@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 import tempfile
 import threading
 import unittest
@@ -225,3 +226,55 @@ class HttpTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StationSongsTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.now = NOW + 40 * DAY
+        self.play("a", "Adele", "Hello", self.now - 2 * HOUR, times=3)
+        self.play("a", "Roxette", "The Look", self.now - 10 * DAY, times=2)
+        self.play("a", "Abba", "Waterloo", self.now - 100 * DAY)
+        self.play("b", "Cher", "Believe", self.now - HOUR)
+
+    def songs(self, **params):
+        return queries.station_songs(self.conn, params, NY, self.now)
+
+    def test_lists_each_song_once_with_counts_for_the_station(self):
+        res = self.songs(station="a")
+        self.assertEqual((res["total"], res["plays"]), (3, 6))
+        self.assertEqual([(s["title"], s["plays"]) for s in res["songs"]], [("Hello", 3), ("The Look", 2), ("Waterloo", 1)])
+        self.assertEqual({s["last_station_id"] for s in res["songs"]}, {"a"})
+
+    def test_all_stations_when_none_is_picked(self):
+        self.assertEqual(self.songs()["total"], 4)
+
+    def test_preset_ranges(self):
+        self.assertEqual([s["title"] for s in self.songs(station="a", range="7d")["songs"]], ["Hello"])
+        self.assertEqual(self.songs(station="a", range="30d")["total"], 2)
+        self.assertEqual(self.songs(station="a", range="90d")["total"], 2)
+        self.assertEqual(self.songs(station="a", range="180d")["total"], 3)
+
+    def test_dates_are_inclusive_and_in_the_stations_zone(self):
+        day = datetime.fromtimestamp(self.now - 10 * DAY, NY).strftime("%Y-%m-%d")
+        both = self.songs(station="a", from_date=day, to_date=day)
+        self.assertEqual([s["title"] for s in both["songs"]], ["The Look"])
+        self.assertEqual(both["plays"], 2)
+        self.assertEqual(self.songs(station="a", from_date=day)["total"], 2)  # that day onwards: The Look and Hello
+        self.assertEqual(self.songs(station="a", to_date=day)["total"], 2)    # up to that day: Waterloo and The Look
+
+    def test_bad_dates_are_ignored(self):
+        self.assertEqual(self.songs(station="a", from_date="soon", to_date="2026-13-45")["total"], 3)
+
+    def test_sorting(self):
+        titles = lambda **kw: [s["title"] for s in self.songs(station="a", **kw)["songs"]]
+        self.assertEqual(titles(sort="az"), ["Hello", "The Look", "Waterloo"])
+        self.assertEqual(titles(sort="recent"), ["Hello", "The Look", "Waterloo"])
+        self.assertEqual(titles(sort="nonsense; DROP TABLE plays")[0], "Hello")
+
+    def test_limit_keeps_the_full_total(self):
+        res = self.songs(station="a", limit="2")
+        self.assertEqual((len(res["songs"]), res["total"]), (2, 3))
+
+    def test_empty_range(self):
+        self.assertEqual(self.songs(station="c"), {"total": 0, "plays": 0, "songs": []})
