@@ -33,6 +33,7 @@ MAX_IMPORT_BYTES = max(1, _env_int("MAX_IMPORT_MB", 1024)) * 1024 * 1024
 # Automatic snapshots of the database (see the README's Backups section).
 BACKUP_EVERY_HOURS = max(0, _env_int("BACKUP_EVERY_HOURS", 24))  # 0 turns them off
 BACKUP_KEEP = max(1, _env_int("BACKUP_KEEP", 7))                  # how many of the newest to keep
+BACKUP_COMPRESS = os.environ.get("BACKUP_COMPRESS", "1").strip().lower() not in ("0", "false", "no", "off")  # gzip them
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", DATA_DIR / "backups"))
 
 # For a server that strangers can reach (see the README's section on public servers).

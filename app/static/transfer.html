@@ -149,7 +149,7 @@
       const b = info.backup || {};
       $('backup-summary').innerHTML = !b.enabled
         ? 'Automatic backups are <b>off</b> (<code>BACKUP_EVERY_HOURS=0</code>).'
-        : `A snapshot is saved every <b>${b.every_hours}</b> hour${b.every_hours === 1 ? '' : 's'}, keeping the newest <b>${b.keep}</b>. ` +
+        : `A snapshot is saved every <b>${b.every_hours}</b> hour${b.every_hours === 1 ? '' : 's'}, keeping the newest <b>${b.keep}</b>${b.compress ? ', compressed' : ''}. ` +
           (b.count ? `Last one: <b>${ago(b.last)}</b> (${b.count} saved, ${fmtBytes(b.bytes)} in all).` : 'None yet; the first is made shortly after the server starts.');
       $('token-card').classList.toggle('hidden', !info.token_required);
       if (info.token_required && !$('token').value) $('token').value = saved.get();

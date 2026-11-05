@@ -219,6 +219,137 @@ def timeseries(conn, params, tz, now):
     return {"bucket": bucket, "labels": labels, "series": sorted(series.values(), key=lambda s: s["sort"])}
 
 
+HEAT_BUCKET = 900           # seconds; every real UTC offset is a whole number of these, so the zone maths stays right
+DROPPED_MIN_PLAYS = 2       # a song heard once in the earlier period was never really in rotation
+OTHER_LIST = 5              # songs listed for "only on this station" in a comparison
+
+
+def heatmap(conn, params, tz, now):
+    """Plays by weekday (Monday first) and hour of day in `tz`, over the filtered range."""
+    where, args, _, _ = build_where(params, tz, now)
+    cells = [[0] * 24 for _ in range(7)]
+    # Grouped in SQL by 15-minute slot, then each slot is placed once: far fewer zone conversions than one per play.
+    for row in conn.execute(f"SELECT p.played_at / {HEAT_BUCKET} AS slot, COUNT(*) AS n FROM plays p{where} GROUP BY slot", args):
+        local = datetime.fromtimestamp(row["slot"] * HEAT_BUCKET, tz)
+        cells[local.weekday()][local.hour] += row["n"]
+    return {"cells": cells, "max": max(max(day) for day in cells), "total": sum(sum(day) for day in cells)}
+
+
+def _play_at(conn, key, at, station=None):
+    """Artist, title and station of a song's play at an exact time (optionally on one station)."""
+    sql, args = "SELECT artist, title, station_id FROM plays WHERE song_key = ? AND played_at = ?", [key, at]
+    if station:
+        sql, args = sql + " AND station_id = ?", args + [station]
+    return conn.execute(sql + " LIMIT 1", args).fetchone()
+
+
+def changes(conn, params, tz, now):
+    """Songs that entered rotation in the range, and songs that fell out of it.
+
+    New: first heard (on the chosen station, or any) inside the range. Dropped: played at least twice in
+    the equally long period before the range and not at all since. Both need history older than the range."""
+    start, _ = resolve_range(params, tz, now)
+    scope, args, _, _ = build_where(params, tz, now, with_time=False)
+    station = params.get("station") or None
+    limit = int_param(params, "limit", 10, 1, 100)
+    if start is None:
+        return {"applicable": False, "reason": "range"}
+    earliest = conn.execute(f"SELECT MIN(p.played_at) FROM plays p{scope}", args).fetchone()[0]
+    if earliest is None or earliest >= start:
+        return {"applicable": False, "reason": "history", "history_start": earliest}
+    span = max(1, now - start)
+    previous = start - span
+
+    fresh = conn.execute(
+        f"""SELECT p.song_key, COUNT(*) AS plays, MIN(p.played_at) AS first_played, MAX(p.played_at) AS last_played
+            FROM plays p{scope} GROUP BY p.song_key HAVING MIN(p.played_at) >= ?
+            ORDER BY plays DESC, first_played DESC""",
+        args + [start],
+    ).fetchall()
+    gone = conn.execute(
+        f"""SELECT p.song_key, SUM(p.played_at < ?) AS plays, MAX(p.played_at) AS last_played
+            FROM plays p{scope}{" AND" if scope else " WHERE"} p.played_at >= ?
+            GROUP BY p.song_key HAVING SUM(p.played_at >= ?) = 0 AND plays >= ?
+            ORDER BY plays DESC, last_played DESC""",
+        [start] + args + [previous, start, DROPPED_MIN_PLAYS],
+    ).fetchall()
+
+    def songs(rows, time_key):
+        out = []
+        for r in rows[:limit]:  # `at` is when it was first heard (new) or last heard (dropped)
+            play = _play_at(conn, r["song_key"], r[time_key], station)
+            out.append({"song_key": r["song_key"], "artist": play["artist"], "title": play["title"],
+                        "plays": r["plays"], "at": r[time_key], "station_id": play["station_id"]})
+        return out
+
+    return {"applicable": True, "since": start, "previous_start": previous, "history_start": earliest,
+            "baseline": start - earliest,
+            "new": {"total": len(fresh), "songs": songs(fresh, "first_played")},
+            "dropped": {"total": len(gone), "songs": songs(gone, "last_played"), "min_plays": DROPPED_MIN_PLAYS}}
+
+
+def _station_songs(conn, where, args, station_id):
+    glue = " AND" if where else " WHERE"
+    rows = conn.execute(
+        f"""SELECT p.song_key, MIN(p.artist) AS artist, MIN(p.title) AS title, COUNT(*) AS n
+            FROM plays p{where}{glue} p.station_id = ? GROUP BY p.song_key""",
+        args + [station_id],
+    )
+    return {r["song_key"]: (r["artist"], r["title"], r["n"]) for r in rows}
+
+
+def _first_plays(conn, station_id):
+    rows = conn.execute("SELECT song_key, MIN(played_at) AS t FROM plays WHERE station_id = ? GROUP BY song_key", (station_id,))
+    return {r["song_key"]: r["t"] for r in rows}
+
+
+def compare(conn, params, tz, now):
+    """Two stations side by side over the range: how much they overlap, and who played shared songs first.
+
+    "First" is the first time we logged the song on each station, so it's only claimed when both stations
+    were being logged by then; a song already playing when the later station was added is "already in rotation"."""
+    a, b = params.get("a", ""), params.get("b", "")
+    info = {r["id"]: r for r in conn.execute("SELECT id, name, color, timezone FROM stations WHERE id IN (?, ?)", (a, b))}
+    if a == b or a not in info or b not in info:
+        return None
+    where, args, _, _ = build_where({k: v for k, v in params.items() if k != "station"}, tz, now)
+    limit = int_param(params, "limit", 10, 1, 200)
+    mine, theirs = _station_songs(conn, where, args, a), _station_songs(conn, where, args, b)
+    shared_keys = mine.keys() & theirs.keys()
+
+    def side(sid, songs):
+        plays = sum(n for _, _, n in songs.values())
+        return {"id": sid, "name": info[sid]["name"], "color": info[sid]["color"], "timezone": info[sid]["timezone"],
+                "plays": plays, "songs": len(songs), "avg_plays": round(plays / len(songs), 1) if songs else 0,
+                "shared_pct": round(100 * len(shared_keys) / len(songs)) if songs else 0}
+
+    first = {"a": 0, "b": 0, "tie": 0, "unknown": 0}
+    songs_out, common_start = [], None
+    if shared_keys:
+        began = [conn.execute("SELECT MIN(played_at) FROM plays WHERE station_id = ?", (sid,)).fetchone()[0] for sid in (a, b)]
+        common_start = max(began)
+        firsts_a, firsts_b = _first_plays(conn, a), _first_plays(conn, b)
+        ordered = sorted(shared_keys, key=lambda k: (-(mine[k][2] + theirs[k][2]), mine[k][1].casefold(), k))
+        for rank, key in enumerate(ordered):
+            ta, tb = firsts_a[key], firsts_b[key]
+            who = "unknown" if min(ta, tb) < common_start else "tie" if ta == tb else "a" if ta < tb else "b"
+            first[who] += 1
+            if rank < limit:
+                songs_out.append({"song_key": key, "artist": mine[key][0], "title": mine[key][1], "plays_a": mine[key][2],
+                                  "plays_b": theirs[key][2], "first_a": ta, "first_b": tb,
+                                  "first": None if who == "unknown" else who, "lead": abs(ta - tb)})
+
+    def only(own, other):
+        keys = sorted(own.keys() - other.keys(), key=lambda k: (-own[k][2], own[k][1].casefold(), k))
+        return {"total": len(keys), "songs": [{"song_key": k, "artist": own[k][0], "title": own[k][1], "plays": own[k][2]}
+                                              for k in keys[:OTHER_LIST]]}
+
+    return {"a": side(a, mine), "b": side(b, theirs), "shared": {"songs": len(shared_keys),
+            "plays_a": sum(mine[k][2] for k in shared_keys), "plays_b": sum(theirs[k][2] for k in shared_keys)},
+            "first": first, "common_start": common_start, "songs": songs_out,
+            "only_a": only(mine, theirs), "only_b": only(theirs, mine)}
+
+
 def health(conn):
     row = conn.execute("SELECT COUNT(*) AS stations, MAX(last_ok_at) AS last_ok_at FROM stations WHERE active = 1").fetchone()
     return {"ok": True, "stations": row["stations"], "last_ok_at": row["last_ok_at"], "now": int(time.time())}

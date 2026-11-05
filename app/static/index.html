@@ -122,6 +122,43 @@
 
     <section class="card bg-base-100 border border-base-300">
       <div class="card-body gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="card-title text-base">When it plays</h2>
+          <div id="heat-legend" class="flex items-center gap-2 text-xs opacity-80"></div>
+        </div>
+        <p id="heat-caption" class="text-xs opacity-60 -mt-1"></p>
+        <div id="heat" class="chart relative"></div>
+        <details class="text-sm">
+          <summary class="cursor-pointer opacity-70">View as table</summary>
+          <div id="heat-table" class="overflow-x-auto mt-2"></div>
+        </details>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-2">
+        <h2 class="card-title text-base">New and dropped songs</h2>
+        <p id="changes-caption" class="text-xs opacity-60 -mt-1"></p>
+        <div id="changes-note"></div>
+        <div id="changes" class="grid md:grid-cols-2 gap-x-6 gap-y-4"></div>
+        <button id="more-changes" class="btn btn-sm self-start hidden">Show more</button>
+      </div>
+    </section>
+
+    <section id="compare-card" class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="card-title text-base mr-2">Compare stations</h2>
+          <select id="cmp-a" class="select select-sm w-auto" aria-label="First station"></select>
+          <span class="text-sm opacity-60">with</span>
+          <select id="cmp-b" class="select select-sm w-auto" aria-label="Second station"></select>
+        </div>
+        <div id="compare"></div>
+      </div>
+    </section>
+
+    <section class="card bg-base-100 border border-base-300">
+      <div class="card-body gap-2">
         <h2 class="card-title text-base">Recent plays</h2>
         <div class="overflow-x-auto">
           <table class="table table-sm">

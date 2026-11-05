@@ -159,28 +159,46 @@ Filter by station, range (24h / 7 / 30 / 90 days / all) and search text. Click a
 history, a per-day chart and a per-station breakdown; click an artist to filter to them.
 For a copy of the data, use Import / Export.
 
+Further down, three cards follow the same filters:
+
+- **When it plays**: a weekday-by-hour heatmap of plays, in the station's own timezone (the server's `TZ` when
+  all stations are showing). Search for an artist to see when *they* get played.
+- **New and dropped songs**: *New* are songs first heard (on the chosen station, or any) inside the selected range;
+  *dropped* are songs played at least twice in the equally long period before it and not once since. It compares the
+  range with the period before it, so it needs history older than the range: it says so when it doesn't have
+  enough, and isn't available for "All time". Because the app only knows what it has logged, "new" really means
+  "new since this app started watching", so give it a few weeks before trusting it.
+- **Compare stations**: pick any two stations to see their overlap, plays per song (a rough measure of how tight
+  the rotation is), the songs both play, and which station played each one first. "First" is when the app first
+  logged the song on each station, so it's only claimed when both stations were already being logged; a song that was
+  already playing when the later station was added shows as "Already in rotation". Songs only one of them plays
+  are listed too.
+
 The pages bundle their own copies of daisyUI 5.7.50 and Tailwind 4.3.4 (in `app/static/vendor/`), so
 nothing is loaded from a third party and the dashboard works without internet access, other than album art.
 
 ## API
 
 `/api/stations`, `/api/summary`, `/api/top-songs`, `/api/top-artists`, `/api/recent`,
-`/api/timeseries`, `/api/now-playing`, `/api/transfer-info`, `/api/song?key=`, `/api/export`,
-`POST /api/import`, `/health`. Most accept `station`,
+`/api/timeseries`, `/api/heatmap`, `/api/changes`, `/api/compare?a=&b=`, `/api/now-playing`, `/api/transfer-info`,
+`/api/song?key=`, `/api/export`, `POST /api/import`, `/health`. Most accept `station`,
 `range` (`24h`, `7d`, `30d`, `90d`, `365d`, `all`), `q`, and `limit`.
 
 ## Backups
 
 **The app backs itself up.** By default it saves a snapshot of the database every 24 hours and keeps the
 newest 7, in a `backups/` folder beside the database (in Docker, `./backups`, or wherever `BACKUP_PATH` points). Each is a complete SQLite
-file made with SQLite's online backup, so it's consistent even while the poller is writing. (Don't copy
+file made with SQLite's online backup, so it's consistent even while the poller is writing, then gzipped
+(`radio-YYYYMMDD-HHMMSS.db.gz`), which typically makes it a third of the size or less. (Don't copy
 `radio.db` by hand while the app is running: the copy can be corrupt.) The first one is made about 20 seconds
-after start, and the Import / Export page shows when the last one ran.
+after start, and the Import / Export page shows when the last one ran. Each backup is checked before it's kept,
+and the compressed file is read back to make sure it unpacks to the same database.
 
 | Setting | Default | |
 |---|---|---|
 | `BACKUP_EVERY_HOURS` | `24` | `0` turns automatic backups off |
 | `BACKUP_KEEP` | `7` | how many of the newest to keep |
+| `BACKUP_COMPRESS` | `1` | `0` saves plain `.db` files instead of `.db.gz` |
 | `BACKUP_DIR` | `<data folder>/backups` | where they go |
 
 **Copy them off the machine.** With `./backups` beside `./data`, snapshots protect against mistakes and
@@ -234,15 +252,18 @@ scheduler of its own (there's no cron in a compose file), so for that pick one o
 **Restoring**
 - *From an export file* (`.jsonl`): start the app, open Import / Export and import it. It merges, so it works into
   an empty server or one that has some data. This is the easiest way and works the same everywhere.
-- *From a snapshot (`radio-….db`):* stop the app, delete `radio.db-wal` and `radio.db-shm` beside `radio.db`,
-  copy the snapshot over `radio.db`, and start the app again. In Docker, run this from the project folder:
+- *From a snapshot (`radio-….db.gz`):* stop the app, delete `radio.db-wal` and `radio.db-shm` beside `radio.db`,
+  unpack the snapshot over `radio.db`, and start the app again. In Docker, run this from the project folder:
 
   ```bash
   docker compose stop
   rm -f data/radio.db-wal data/radio.db-shm
-  cp backups/radio-YYYYMMDD-HHMMSS.db data/radio.db
+  gunzip -c backups/radio-YYYYMMDD-HHMMSS.db.gz > data/radio.db
   docker compose start
   ```
+
+  (A snapshot ending in plain `.db`, like those made before compression existed or with `BACKUP_COMPRESS=0`,
+  is copied instead: `cp backups/radio-YYYYMMDD-HHMMSS.db data/radio.db`.)
 
   The restored file has to be writable by the user in `APP_UID` (if you copied it with `sudo`, `chown` it to
   that user). The same steps worked in my test without Docker; the compose version itself is untested.

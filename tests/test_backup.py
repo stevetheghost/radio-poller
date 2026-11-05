@@ -1,3 +1,4 @@
+import gzip
 import json
 import os
 import sqlite3
@@ -40,8 +41,67 @@ class Base(unittest.TestCase):
 
 
 class MakeBackupTests(Base):
-    def test_a_backup_is_a_complete_standalone_database(self):
+    def test_a_backup_is_compressed_and_unpacks_to_the_database(self):
         path = backup.make_backup(self.path, self.backups, keep=7, now=NOW)
+        self.assertRegex(path.name, r"^radio-\d{8}-\d{6}\.db\.gz$")
+        self.assertEqual(sorted(p.name for p in self.backups.iterdir()), [path.name])  # no uncompressed copy left behind
+        unpacked = self.dir / "restored.db"
+        with gzip.open(path, "rb") as src:
+            unpacked.write_bytes(src.read())
+        self.assertEqual(self.count(unpacked), 20)
+        conn = sqlite3.connect(str(unpacked))
+        self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+        conn.close()
+        self.assertLess(path.stat().st_size, unpacked.stat().st_size)
+
+    def test_a_restore_from_the_gzip_works_like_the_readme_says(self):
+        path = backup.make_backup(self.path, self.backups, keep=7, now=NOW)
+        conn = db.connect(self.path)
+        db.insert_plays(conn, "a", [Play("New", "Song", NOW + 99999)])
+        conn.close()
+        for suffix in ("-wal", "-shm"):
+            Path(str(self.path) + suffix).unlink(missing_ok=True)
+        with gzip.open(path, "rb") as src:  # gunzip -c backups/radio-….db.gz > data/radio.db
+            self.path.write_bytes(src.read())
+        db.init(self.path)
+        self.assertEqual(self.count(self.path), 20)
+
+    def test_a_corrupt_compressed_file_is_not_kept(self):
+        real = gzip.open
+
+        def damaged_open(target, *args, **kwargs):  # the read-back check: someone flips bytes in the archive first
+            with open(target, "r+b") as f:
+                f.seek(os.path.getsize(target) // 2)
+                f.write(b"\xff\xff\xff\xff")
+            return real(target, *args, **kwargs)
+
+        with mock.patch.object(backup.gzip, "open", damaged_open):
+            with self.assertRaises(Exception):
+                backup.make_backup(self.path, self.backups, keep=7, now=NOW)
+        self.assertEqual(list(self.backups.iterdir()), [])  # neither the .gz nor the stepping-stone copy
+
+    def test_a_failed_compression_leaves_nothing_behind(self):
+        with mock.patch.object(backup, "_gzip_file", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                backup.make_backup(self.path, self.backups, keep=7, now=NOW)
+        self.assertEqual(list(self.backups.iterdir()), [])
+
+    def test_compression_can_be_turned_off(self):
+        path = backup.make_backup(self.path, self.backups, keep=7, now=NOW, compress=False)
+        self.assertRegex(path.name, r"^radio-\d{8}-\d{6}\.db$")
+
+    def test_plain_and_compressed_backups_are_pruned_together(self):
+        for n in range(3):
+            backup.make_backup(self.path, self.backups, keep=3, now=NOW + n * 86400, compress=False)
+        for n in range(3, 5):
+            backup.make_backup(self.path, self.backups, keep=3, now=NOW + n * 86400)
+        names = [p.name for p in backup.list_backups(self.backups)]
+        self.assertEqual(len(names), 3)
+        self.assertEqual([n.endswith(".gz") for n in names], [False, True, True])  # the oldest two plain ones went
+
+    def test_a_backup_is_a_complete_standalone_database(self):
+        path = backup.make_backup(self.path, self.backups, keep=7, now=NOW, compress=False)
         self.assertRegex(path.name, r"^radio-\d{8}-\d{6}\.db$")
         self.assertEqual(path.parent, self.backups)
         self.assertEqual(self.count(path), 20)
@@ -70,7 +130,7 @@ class MakeBackupTests(Base):
         try:
             sizes = []
             for n in range(8):
-                path = backup.make_backup(self.path, self.backups, keep=20, now=NOW + n)
+                path = backup.make_backup(self.path, self.backups, keep=20, now=NOW + n, compress=False)
                 conn = sqlite3.connect(str(path))
                 self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
                 sizes.append(conn.execute("SELECT COUNT(*) FROM plays").fetchone()[0])
@@ -83,7 +143,7 @@ class MakeBackupTests(Base):
         self.assertGreaterEqual(min(sizes), 20)
 
     def test_a_backup_can_be_restored(self):
-        path = backup.make_backup(self.path, self.backups, keep=7, now=NOW)
+        path = backup.make_backup(self.path, self.backups, keep=7, now=NOW, compress=False)
         conn = db.connect(self.path)
         db.insert_plays(conn, "a", [Play("New", "Song", NOW + 99999)])
         conn.close()
@@ -114,7 +174,7 @@ class RetentionTests(Base):
         (self.backups / "radio-20260101-000000.db.partial-shm").write_text("crashed")
         (self.backups / "radio-20260101-000000.db.partial-wal").write_text("crashed")
         for n in range(5):
-            backup.make_backup(self.path, self.backups, keep=3, now=NOW + n * 86400)
+            backup.make_backup(self.path, self.backups, keep=3, now=NOW + n * 86400, compress=False)
         names = sorted(p.name for p in self.backups.iterdir())
         kept = [n for n in names if backup.NAME.fullmatch(n)]
         self.assertEqual(len(kept), 3)

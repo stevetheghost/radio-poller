@@ -1,9 +1,11 @@
 """Regular snapshots of the database.
 
 Each backup is a complete, self-contained SQLite file made with SQLite's online backup, so it is
-consistent even while the poller is writing (copying the live file with `cp` is not). The newest few
-are kept and older ones are removed.
+consistent even while the poller is writing (copying the live file with `cp` is not), then gzipped
+(radio-YYYYMMDD-HHMMSS.db.gz) unless compression is turned off. The newest few are kept and older
+ones are removed. Plain .db backups from before compression existed are still listed and pruned.
 """
+import gzip
 import logging
 import os
 import re
@@ -14,7 +16,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-NAME = re.compile(r"radio-\d{8}-\d{6}\.db")
+NAME = re.compile(r"radio-\d{8}-\d{6}\.db(\.gz)?")
 INITIAL_DELAY = 20      # seconds after start before the first check, so startup isn't competing with it
 CHECK_EVERY = 600       # how often to see whether a backup is due
 RETRY_AFTER_FAILURE = 3600
@@ -38,7 +40,7 @@ def newest_time(backup_dir):
     return max(times) if times else None
 
 
-def status(backup_dir, every_hours, keep):
+def status(backup_dir, every_hours, keep, compress=True):
     """A summary for the Import / Export page."""
     files = list_backups(backup_dir) if backup_dir else []
     size = 0
@@ -48,7 +50,7 @@ def status(backup_dir, every_hours, keep):
         except OSError:
             pass
     last = newest_time(backup_dir) if backup_dir else None
-    return {"enabled": bool(backup_dir) and every_hours > 0, "every_hours": every_hours, "keep": keep,
+    return {"enabled": bool(backup_dir) and every_hours > 0, "every_hours": every_hours, "keep": keep, "compress": compress,
             "count": len(files), "last": int(last) if last else None, "bytes": size}
 
 
@@ -64,6 +66,20 @@ def _remove_partial(partial):
         Path(str(partial) + suffix).unlink(missing_ok=True)
 
 
+def _gzip_file(source, target, name, mtime):
+    """Compress `source` into `target`, then read it back to prove it decompresses to the same size."""
+    with open(source, "rb") as src, open(target, "wb") as raw:
+        with gzip.GzipFile(filename=name, mode="wb", compresslevel=6, fileobj=raw, mtime=mtime) as out:
+            while chunk := src.read(1 << 20):
+                out.write(chunk)
+    size = 0
+    with gzip.open(target, "rb") as check:  # the gzip CRC is verified when the end is reached
+        while chunk := check.read(1 << 20):
+            size += len(chunk)
+    if size != os.path.getsize(source):
+        raise RuntimeError("the compressed backup does not match the original")
+
+
 def prune(backup_dir, keep):
     for stray in Path(backup_dir).glob("*.partial*"):  # left behind by a crash mid-backup
         stray.unlink(missing_ok=True)
@@ -71,13 +87,16 @@ def prune(backup_dir, keep):
         old.unlink(missing_ok=True)
 
 
-def make_backup(db_path, backup_dir, keep, now=None):
+def make_backup(db_path, backup_dir, keep, now=None, compress=True):
     """Write a new snapshot, check it, then remove the oldest beyond `keep`. Returns its path."""
     backup_dir = Path(backup_dir)
     backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.time() if now is None else now))  # UTC, sorts by time
-    final = backup_dir / f"radio-{stamp}.db"
-    partial = backup_dir / (final.name + ".partial")  # only a finished, checked file gets the real name
+    moment = int(time.time() if now is None else now)
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(moment))  # UTC, sorts by time
+    plain = backup_dir / f"radio-{stamp}.db"
+    final = plain.with_name(plain.name + ".gz") if compress else plain
+    partial = backup_dir / (plain.name + ".partial")  # only a finished, checked file gets the real name
+    zipped = backup_dir / (final.name + ".partial")
     source = sqlite3.connect(str(db_path))
     target = sqlite3.connect(str(partial))
     try:
@@ -96,16 +115,26 @@ def make_backup(db_path, backup_dir, keep, now=None):
     # shared-memory file behind. The finished backup is standalone, so those files are just litter.
     for suffix in ("-wal", "-shm"):
         Path(str(partial) + suffix).unlink(missing_ok=True)
-    os.replace(partial, final)
+    if compress:
+        try:
+            _gzip_file(partial, zipped, plain.name, moment)
+            os.replace(zipped, final)
+        except BaseException:
+            zipped.unlink(missing_ok=True)
+            raise
+        finally:
+            _remove_partial(partial)  # the uncompressed copy was only a stepping stone
+    else:
+        os.replace(partial, final)
     prune(backup_dir, keep)
     return final
 
 
 class BackupThread(threading.Thread):
-    def __init__(self, db_path, backup_dir, every_seconds, keep, stop):
+    def __init__(self, db_path, backup_dir, every_seconds, keep, stop, compress=True):
         super().__init__(name="backup", daemon=True)
         self.db_path, self.backup_dir = db_path, backup_dir
-        self.every_seconds, self.keep, self.stop = every_seconds, keep, stop
+        self.every_seconds, self.keep, self.stop, self.compress = every_seconds, keep, stop, compress
 
     def run(self):
         if self.stop.wait(INITIAL_DELAY):
@@ -114,7 +143,7 @@ class BackupThread(threading.Thread):
             delay = CHECK_EVERY
             try:
                 if due(self.backup_dir, self.every_seconds):
-                    path = make_backup(self.db_path, self.backup_dir, self.keep)
+                    path = make_backup(self.db_path, self.backup_dir, self.keep, compress=self.compress)
                     log.info("backup written: %s (%.1f MB); keeping the newest %d",
                              path.name, path.stat().st_size / 2**20, self.keep)
             except Exception:

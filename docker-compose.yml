@@ -17,6 +17,7 @@ services:
       BACKUP_DIR: /backups      # where the automatic snapshots go inside the container (the folder below)
       # BACKUP_EVERY_HOURS: "24"  # automatic database snapshots (0 = off)
       # BACKUP_KEEP: "7"          # how many of the newest snapshots to keep
+      # BACKUP_COMPRESS: "1"      # gzip the snapshots (0 = save plain .db files)
       # --- for a server that strangers can reach: see "Running on a public server" in the README ---
       # ADMIN_TOKEN: ""         # if set, importing, exporting and changing stations require this token
       # READ_ONLY: "1"          # the web interface can't change anything at all

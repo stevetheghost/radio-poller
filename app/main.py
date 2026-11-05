@@ -28,11 +28,13 @@ def main():
                         max_import_bytes=config.MAX_IMPORT_BYTES, read_only=config.READ_ONLY,
                         max_connections=config.MAX_CONNECTIONS, request_timeout=config.REQUEST_TIMEOUT,
                         trust_forwarded=config.TRUST_FORWARDED_FOR, backup_dir=config.BACKUP_DIR,
-                        backup_every_hours=config.BACKUP_EVERY_HOURS, backup_keep=config.BACKUP_KEEP)
+                        backup_every_hours=config.BACKUP_EVERY_HOURS, backup_keep=config.BACKUP_KEEP,
+                        backup_compress=config.BACKUP_COMPRESS)
     if config.BACKUP_EVERY_HOURS:
-        BackupThread(db_path, config.BACKUP_DIR, config.BACKUP_EVERY_HOURS * 3600, config.BACKUP_KEEP, stop).start()
-        log.info("automatic backups: every %d h, keeping the newest %d, in %s",
-                 config.BACKUP_EVERY_HOURS, config.BACKUP_KEEP, config.BACKUP_DIR)
+        BackupThread(db_path, config.BACKUP_DIR, config.BACKUP_EVERY_HOURS * 3600, config.BACKUP_KEEP, stop,
+                     config.BACKUP_COMPRESS).start()
+        log.info("automatic backups: every %d h, keeping the newest %d, %s, in %s", config.BACKUP_EVERY_HOURS, config.BACKUP_KEEP,
+                 "gzipped" if config.BACKUP_COMPRESS else "uncompressed", config.BACKUP_DIR)
     else:
         log.info("automatic backups are off (BACKUP_EVERY_HOURS=0)")
 

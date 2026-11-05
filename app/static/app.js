@@ -7,8 +7,12 @@
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const TOP_PAGE = 10;     // top songs shown at first, and added by each "Show more"
   const RECENT_PAGE = 25;
+const CHANGES_PAGE = 10;
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-  const state = { station: '', range: '7d', q: '', songLimit: TOP_PAGE, recentLimit: RECENT_PAGE, stations: [], tz: '' };
+  const state = { station: '', range: '7d', q: '', songLimit: TOP_PAGE, recentLimit: RECENT_PAGE, changeLimit: CHANGES_PAGE,
+                  compareLimit: CHANGES_PAGE, compareA: '', compareB: '', stations: [], tz: '' };
   let refreshToken = 0;
 
   const seriesColor = (slot) => `var(--series-${(slot % 8) + 1})`;  // a station's slot never changes when you reorder
@@ -270,17 +274,192 @@
       </div>`).join('')}</div>`;
   }
 
+  // ---- when it plays: weekday x hour heatmap ---------------------------------
+
+  const hourShort = (h) => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}`;
+  const hourLong = (h) => `${h % 12 || 12} ${h < 12 ? 'AM' : 'PM'}`;
+  // One hue, light to dark, mixed into the card's own surface so it reads in both themes.
+  const heatFill = (v, max) => `color-mix(in srgb, var(--series-1) ${Math.round(14 + 86 * (v / max))}%, var(--color-base-100))`;
+
+  function drawHeat(el, heat) {
+    el.innerHTML = '';
+    if (!heat.total) {
+      el.innerHTML = '<div class="py-12 text-center opacity-60 text-sm">No plays in this range yet.</div>';
+      return;
+    }
+    const W = Math.max(280, el.clientWidth), m = { l: 34, r: 2, t: 16, b: 2 };
+    const cw = (W - m.l - m.r) / 24, ch = Math.max(14, Math.min(26, cw * 0.9)), H = m.t + 7 * ch + m.b, GAP = 2;
+    let g = '';
+    for (let h = 0; h < 24; h += 3) g += `<text x="${m.l + cw * h + cw / 2}" y="10" text-anchor="middle">${hourShort(h)}</text>`;
+    DAYS.forEach((d, i) => { g += `<text x="${m.l - 6}" y="${m.t + ch * i + ch / 2 + 4}" text-anchor="end">${d}</text>`; });
+    heat.cells.forEach((row, d) => row.forEach((v, h) => {
+      g += `<rect x="${m.l + cw * h + GAP / 2}" y="${m.t + ch * d + GAP / 2}" width="${cw - GAP}" height="${ch - GAP}" rx="2" style="fill:${v ? heatFill(v, heat.max) : 'var(--grid)'}"/>`;
+    }));
+    g += `<rect class="hover-cell" width="${cw - GAP}" height="${ch - GAP}" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0" pointer-events="none"/>`;
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Plays by weekday and hour of day">${g}</svg><div class="chart-tip" hidden></div>`;
+
+    const svg = el.querySelector('svg'), tip = el.querySelector('.chart-tip'), mark = el.querySelector('.hover-cell');
+    const hide = () => { tip.hidden = true; mark.setAttribute('opacity', '0'); };
+    svg.addEventListener('mousemove', (e) => {
+      const r = svg.getBoundingClientRect();
+      const px = ((e.clientX - r.left) / r.width) * W, py = ((e.clientY - r.top) / r.height) * H;
+      const h = Math.floor((px - m.l) / cw), d = Math.floor((py - m.t) / ch);
+      if (h < 0 || h > 23 || d < 0 || d > 6) return hide();
+      const v = heat.cells[d][h];
+      mark.setAttribute('x', m.l + cw * h + GAP / 2); mark.setAttribute('y', m.t + ch * d + GAP / 2); mark.setAttribute('opacity', '0.5');
+      tip.innerHTML = `<div class="font-semibold">${DAYS_LONG[d]} ${hourLong(h)}–${hourLong((h + 1) % 24)}</div>` +
+        `<div><b>${nf.format(v)}</b> play${v === 1 ? '' : 's'}${heat.total ? ` · ${(100 * v / heat.total).toFixed(1)}% of all` : ''}</div>`;
+      tip.hidden = false;
+      const cx = ((m.l + cw * h + cw / 2) / W) * r.width, cy = ((m.t + ch * d) / H) * r.height;
+      tip.style.left = `${Math.min(Math.max(0, cx + 12), r.width - tip.offsetWidth)}px`;
+      tip.style.top = `${Math.max(0, cy - tip.offsetHeight - 6)}px`;
+    });
+    svg.addEventListener('mouseleave', hide);
+  }
+
+  function renderHeat(heat) {
+    $('heat-caption').textContent = heat.total
+      ? `Total plays by weekday and hour of day, in ${zoneName(heat.tz)}, for the selected range${state.q ? ` and search “${state.q}”` : ''}.` : '';
+    $('heat-legend').innerHTML = heat.total
+      ? `<span>Fewer</span><span class="inline-block h-2.5 w-24 rounded-sm" style="background:linear-gradient(90deg,${heatFill(1, heat.max * 7.2)},${heatFill(1, 1)})"></span><span>More (peak ${nf.format(heat.max)})</span>` : '';
+    drawHeat($('heat'), heat);
+    $('heat-table').innerHTML = heat.total
+      ? `<table class="table table-xs"><thead><tr><th></th>${Array.from({ length: 24 }, (_, h) => `<th class="text-right">${hourShort(h)}</th>`).join('')}</tr></thead><tbody>` +
+        heat.cells.map((row, d) => `<tr><th>${DAYS[d]}</th>${row.map((v) => `<td class="text-right tabular-nums">${v || ''}</td>`).join('')}</tr>`).join('') + '</tbody></table>'
+      : '';
+  }
+
+  // ---- new and dropped songs --------------------------------------------------
+
+  function duration(s) {
+    if (s < 5400) return `${Math.max(1, Math.round(s / 60))} min`;
+    if (s < 129600) return `${Math.round(s / 3600)} h`;
+    return `${Math.round(s / 86400)} d`;
+  }
+
+  function spanText(s) {  // "7 days", "36 hours"
+    const days = s / 86400, n = days >= 1.5 ? Math.round(days) : Math.max(1, Math.round(s / 3600));
+    return `${n} ${days >= 1.5 ? 'day' : 'hour'}${n === 1 ? '' : 's'}`;
+  }
+
+  function renderChanges(res) {
+    const note = $('changes-note'), box = $('changes'), more = $('more-changes');
+    box.innerHTML = ''; note.innerHTML = ''; more.classList.add('hidden');
+    $('changes-caption').textContent = '';
+    if (!res.applicable) {
+      note.innerHTML = `<div class="text-sm opacity-70 py-6 text-center">${res.reason === 'range'
+        ? 'Pick a range shorter than “All time” (it compares the range with the period just before it).'
+        : 'Not enough history yet: this compares the selected range with the period before it, so it needs plays from before the range started.'}</div>`;
+      return;
+    }
+    const span = res.since - res.previous_start, where = state.station ? ` on ${(state.stations.find((s) => s.id === state.station) || {}).name || 'this station'}` : '';
+    $('changes-caption').textContent = `The selected range${where}, compared with the ${spanText(span)} before it.` +
+      (res.baseline < span ? ` Only ${spanText(res.baseline)} of earlier history exists, so some songs here may just not have come up before.` : '');
+
+    const item = (s, verb) => `
+      <li class="flex items-start gap-3 py-2 px-1 border-t border-base-300 first:border-t-0 cursor-pointer hover:bg-base-200" data-key="${esc(s.song_key)}">
+        <div class="min-w-0 flex-1"><div class="font-medium truncate">${esc(s.title)}</div><div class="text-xs opacity-60 truncate">${esc(s.artist)}</div></div>
+        <div class="text-right text-sm whitespace-nowrap">
+          <div class="tabular-nums">${nf.format(s.plays)} play${s.plays === 1 ? '' : 's'}</div>
+          <div class="text-xs flex items-center justify-end gap-1.5">${state.station ? '' : stationDot(s.station_id)}<span class="opacity-60">${verb} ${fmtTime(s.at, s.station_id)}</span></div></div>
+      </li>`;
+    const column = (title, sub, group, verb, none) => `
+      <div>
+        <div class="flex items-center gap-2"><h3 class="font-semibold">${title}</h3><span class="badge badge-sm badge-ghost">${nf.format(group.total)}</span></div>
+        <p class="text-xs opacity-60 mb-1">${sub}</p>
+        ${group.songs.length ? `<ul>${group.songs.map((s) => item(s, verb)).join('')}</ul>` : `<div class="text-sm opacity-60 py-4">${none}</div>`}
+      </div>`;
+    box.innerHTML =
+      column('New in rotation', 'First heard in this range', res.new, 'first heard', 'Nothing new in this range.') +
+      column('Dropped out', `Played ${res.dropped.min_plays}+ times in the period before, not once since`, res.dropped, 'last heard', 'Nothing has dropped out.');
+    more.classList.toggle('hidden', res.new.total <= res.new.songs.length && res.dropped.total <= res.dropped.songs.length);
+  }
+
+  // ---- comparing two stations -------------------------------------------------
+
+  let compareSignature = '', compareToken = 0;
+
+  function syncCompareSelects() {
+    const ids = state.stations.map((s) => s.id);
+    if (!ids.includes(state.compareA) || state.compareA === state.compareB) state.compareA = ids.find((id) => id !== state.compareB) || ids[0] || '';
+    if (!ids.includes(state.compareB) || state.compareB === state.compareA) state.compareB = ids.find((id) => id !== state.compareA) || '';
+    const signature = state.stations.map((s) => `${s.id}|${s.name}|${s.active}`).join(',');
+    if (signature !== compareSignature) {  // rebuilding the lists would close one the user has open, so only when they changed
+      compareSignature = signature;
+      const options = state.stations.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}${s.active ? '' : ' (paused)'}</option>`).join('');
+      $('cmp-a').innerHTML = options; $('cmp-b').innerHTML = options;
+    }
+    $('cmp-a').value = state.compareA; $('cmp-b').value = state.compareB;
+  }
+
+  async function loadCompare() {
+    const token = ++compareToken;
+    $('compare-card').classList.toggle('hidden', state.stations.length < 2);
+    if (state.stations.length < 2) return;
+    syncCompareSelects();
+    try {
+      const data = await api('/api/compare', { a: state.compareA, b: state.compareB, range: state.range, q: state.q, limit: state.compareLimit });
+      if (token === compareToken) renderCompare(data);
+    } catch (err) {
+      console.error(err);
+      if (token === compareToken) $('compare').innerHTML = '<div class="text-sm opacity-60 py-4">Could not load the comparison.</div>';
+    }
+  }
+
+  function renderCompare(c) {
+    const label = (side) => `<span class="inline-flex items-center gap-1.5">${stationDot(side.id)}${esc(side.name)}</span>`;
+    const card = (side, other) => `
+      <div class="rounded-box border border-base-300 p-3">
+        <div class="font-medium">${label(side)}</div>
+        <div class="mt-1 text-sm flex flex-wrap gap-x-4 gap-y-0.5">
+          <span><b class="tabular-nums">${nf.format(side.plays)}</b> plays</span><span><b class="tabular-nums">${nf.format(side.songs)}</b> songs</span>
+          <span><b>${side.avg_plays}</b> plays per song</span></div>
+        <div class="text-xs opacity-70 mt-1">${side.songs ? `${side.shared_pct}% of its songs also play on ${esc(other.name)}` : 'No plays in this range'}</div>
+      </div>`;
+    let html = `<div class="grid sm:grid-cols-2 gap-3">${card(c.a, c.b)}${card(c.b, c.a)}</div>`;
+
+    if (!c.shared.songs) {
+      html += '<div class="text-sm opacity-60 py-4 text-center">These stations have no songs in common in this range.</div>';
+    } else {
+      const f = c.first, undecided = f.unknown + f.tie;
+      html += `<p class="text-sm"><b>${nf.format(c.shared.songs)}</b> shared song${c.shared.songs === 1 ? '' : 's'}. Of those, ` +
+        `${label(c.a)} played <b>${nf.format(f.a)}</b> first and ${label(c.b)} played <b>${nf.format(f.b)}</b> first` +
+        (undecided ? `; <b>${nf.format(undecided)}</b> can't be called (already in rotation when the later station was added${f.tie ? ', or heard at the same moment' : ''})` : '') + '.</p>';
+      html += `<div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Song</th>
+        <th class="text-right">${label(c.a)}</th><th class="text-right">${label(c.b)}</th><th>Heard first on</th></tr></thead><tbody>` +
+        c.songs.map((s) => {
+          const winner = s.first === 'a' ? c.a : s.first === 'b' ? c.b : null;
+          const first = winner ? `${label(winner)} <span class="text-xs opacity-60">${s.lead ? duration(s.lead) + ' earlier' : ''}</span>`
+            : s.first === 'tie' ? '<span class="text-xs opacity-60">Same time</span>' : '<span class="text-xs opacity-60">Already in rotation</span>';
+          return `<tr class="hover:bg-base-200 cursor-pointer" data-key="${esc(s.song_key)}"><td><div class="font-medium">${esc(s.title)}</div><div class="text-xs opacity-60">${esc(s.artist)}</div></td>
+            <td class="text-right tabular-nums">${nf.format(s.plays_a)}</td><td class="text-right tabular-nums">${nf.format(s.plays_b)}</td><td class="whitespace-nowrap">${first}</td></tr>`;
+        }).join('') + '</tbody></table></div>';
+      if (c.shared.songs > c.songs.length) html += '<button id="more-compare" class="btn btn-sm self-start">Show more</button>';
+    }
+
+    const only = (side, group) => group.total ? `
+      <div><h3 class="font-semibold text-sm">Only on ${label(side)} <span class="badge badge-sm badge-ghost">${nf.format(group.total)}</span></h3>
+        <ul>${group.songs.map((s) => `
+          <li class="flex items-center gap-3 py-1.5 px-1 border-t border-base-300 first:border-t-0 cursor-pointer hover:bg-base-200" data-key="${esc(s.song_key)}">
+            <div class="min-w-0 flex-1"><div class="text-sm font-medium truncate">${esc(s.title)}</div><div class="text-xs opacity-60 truncate">${esc(s.artist)}</div></div>
+            <span class="text-sm tabular-nums">${nf.format(s.plays)}</span></li>`).join('')}</ul></div>` : '';
+    const left = only(c.a, c.only_a), right = only(c.b, c.only_b);
+    if (left || right) html += `<div class="grid md:grid-cols-2 gap-x-6 gap-y-4">${left}${right}</div>`;
+    $('compare').innerHTML = `<div class="flex flex-col gap-3">${html}</div>`;
+  }
+
   // ---- refresh --------------------------------------------------------------
 
   async function refresh() {
     const token = ++refreshToken;
     const f = filters();
     try {
-      const [info, now, sum, ts, songs, artists, recent] = await Promise.all([
+      const [info, now, sum, ts, songs, artists, recent, heat, changes] = await Promise.all([
         api('/api/stations'), api('/api/now-playing', { station: state.station }),
         api('/api/summary', f), api('/api/timeseries', f),
         api('/api/top-songs', { ...f, limit: state.songLimit }), api('/api/top-artists', f),
         api('/api/recent', { ...f, limit: state.recentLimit }),
+        api('/api/heatmap', f), api('/api/changes', { ...f, limit: state.changeLimit }),
       ]);
       if (token !== refreshToken) return;
       renderStations(info);
@@ -297,13 +476,17 @@
       renderSongs(songs);
       renderArtists(artists);
       renderRecent(recent);
+      lastHeat = heat;
+      renderHeat(heat);
+      renderChanges(changes);
+      loadCompare();
     } catch (err) {
       console.error(err);
       $('health').textContent = 'Could not reach the server';
     }
   }
 
-  let lastSeries = null;
+  let lastSeries = null, lastHeat = null;
 
   // ---- song detail ----------------------------------------------------------
 
@@ -345,7 +528,7 @@
     });
   }
 
-  function resetPaging() { state.songLimit = TOP_PAGE; state.recentLimit = RECENT_PAGE; }
+  function resetPaging() { state.songLimit = TOP_PAGE; state.recentLimit = RECENT_PAGE; state.changeLimit = CHANGES_PAGE; state.compareLimit = CHANGES_PAGE; }
 
   $('ranges').addEventListener('click', (e) => {
     const b = e.target.closest('[data-range]');
@@ -370,12 +553,29 @@
   });
   $('more-songs').addEventListener('click', () => { state.songLimit += TOP_PAGE; refresh(); });
   $('more-recent').addEventListener('click', () => { state.recentLimit += RECENT_PAGE; refresh(); });
+  $('more-changes').addEventListener('click', () => { state.changeLimit += CHANGES_PAGE; refresh(); });
+  $('changes').addEventListener('click', (e) => { const li = e.target.closest('[data-key]'); if (li) openSong(li.dataset.key); });
+  $('compare').addEventListener('click', (e) => {
+    if (e.target.closest('#more-compare')) { state.compareLimit += CHANGES_PAGE; loadCompare(); return; }
+    const row = e.target.closest('[data-key]');
+    if (row) openSong(row.dataset.key);
+  });
+  function pickCompare(side) {  // the two sides can't be the same station: moving one onto the other moves the other away
+    const mine = side === 'A' ? 'compareA' : 'compareB', theirs = side === 'A' ? 'compareB' : 'compareA';
+    state[mine] = $(side === 'A' ? 'cmp-a' : 'cmp-b').value;
+    if (state[theirs] === state[mine]) state[theirs] = '';
+    state.compareLimit = CHANGES_PAGE;
+    loadCompare();
+  }
+  $('cmp-a').addEventListener('change', () => pickCompare('A'));
+  $('cmp-b').addEventListener('change', () => pickCompare('B'));
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       if (lastSeries) drawChart($('chart'), lastSeries);
+      if (lastHeat) drawHeat($('heat'), lastHeat);
       if (modalSeries && $('song-modal').open) drawChart($('song-chart'), modalSeries);
     }, 150);
   });
