@@ -37,6 +37,7 @@ services:
     mem_limit: 512m
     cpus: 0.25
     pids_limit: 256
+    init: true    # a tiny init as PID 1 that cleans up finished child processes (the healthcheck's), so none pile up
     # The app only writes to /data and /backups, so the rest of the container can be locked down.
     read_only: true
     tmpfs:

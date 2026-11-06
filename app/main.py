@@ -13,6 +13,12 @@ log = logging.getLogger("radio-poller")
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # This app is PID 1 in its container, and Docker's healthcheck runs a process inside it that ends up as our child.
+    # Nothing here ever wait()s for children, so each finished check stayed a zombie and kept its slot against the
+    # container's pids_limit until the limit was reached and every later check failed. Ignoring SIGCHLD makes the
+    # kernel clear them itself. (The app starts no subprocesses of its own.)
+    if hasattr(signal, "SIGCHLD"):
+        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     db_path = config.DATA_DIR / "radio.db"
     db.init(db_path)
